@@ -277,7 +277,7 @@ function gironeTable(sportId) {
   if (!rows.length) return '';
   const p = puntiIncontro();
   return `
-  <h4>Classifica del girone</h4>
+  <h4>Classifica degli scontri</h4>
   <div class="tbl-wrap"><table>
     <thead><tr><th class="num">#</th><th>Partecipante</th><th class="num">G</th><th class="num">V</th>
       <th class="num">N</th><th class="num">P</th><th class="num">Fatti</th><th class="num">Subiti</th><th class="num">Punti</th></tr></thead>
@@ -299,15 +299,15 @@ function calendarioPane(s) {
 
   if (!incontri.length) {
     return `<div class="card">${testa}
-      <div class="empty">${formato === 'classifica'
-        ? 'Gara unica: non ci sono incontri, si registra la classifica finale.'
+      <div class="empty">${formato === 'tutti'
+        ? 'Si gareggia tutti insieme: non ci sono incontri, guarda la classifica.'
         : 'Nessun incontro in calendario.'}</div>
     </div>`;
   }
 
   let body;
   if (formato === 'tabellone') body = bracketView(s.id);
-  else if (formato === 'tutti') body = listaFasi(s.id) + gironeTable(s.id);
+  else if (formato === 'scontro') body = listaFasi(s.id) + gironeTable(s.id);
   else body = listaFasi(s.id);
 
   return `<div class="card">${testa}${body}</div>`;

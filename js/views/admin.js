@@ -85,7 +85,7 @@ const sportFields = () => [
     hint: 'Determina da dove pescare i partecipanti quando generi il calendario.',
   },
   {
-    k: 'formato', label: 'Formato', type: 'select', def: 'classifica',
+    k: 'formato', label: 'Formato', type: 'select', def: 'tutti',
     options: FORMATI.map(f => ({ v: f.v, l: f.l })),
     hint: FORMATI.map(f => f.l + ': ' + f.desc).join(' · '),
   },
@@ -520,14 +520,16 @@ function paneCalendario() {
 }
 
 function previsione(formato, n) {
-  if (formato === 'tutti') return `Verranno create ${n * (n - 1) / 2} partite in ${n % 2 ? n : n - 1} giornate.`;
+  if (formato === 'scontro') {
+    return `Ogni partecipante affronta gli altri una volta: ${n * (n - 1) / 2} partite, ` +
+      `${n % 2 ? n : n - 1} giornate, ${n - 1} incontri a testa. Nessun ritorno.`;
+  }
   if (formato === 'tabellone') {
     let size = 2; while (size < n) size *= 2;
     const turni = Math.round(Math.log2(size));
     return `Tabellone da ${size} posti: ${turni} turni, ${n - 1} partite, ${size - n} passaggi automatici al primo turno.`;
   }
-  if (formato === 'scontro') return `Verranno accoppiate ${Math.floor(n / 2)} sfide.`;
-  return 'Questo formato non prevede incontri.';
+  return 'Gara unica: si gareggia tutti insieme, non servono incontri. Compila la classifica.';
 }
 
 /* ---------- classifiche per disciplina ---------- */

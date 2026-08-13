@@ -106,12 +106,15 @@ classifica, le squadre sono composizioni libere che tagliano trasversalmente le 
 
 Ogni disciplina ha il suo formato, che decide come viene mostrato il calendario nella sua scheda:
 
-| Formato | Rendering | Quando usarlo |
+| Formato | Cosa genera | Rendering |
 |---|---|---|
-| **Classifica aperta** | solo elenco risultati | tutti gareggiano insieme, conta l'ordine d'arrivo |
-| **Scontri diretti** | elenco di sfide | sfide uno contro uno senza struttura |
-| **Tabellone a eliminazione** | turni affiancati, scorrevoli | chi vince avanza |
-| **Girone all'italiana** | elenco incontri + classifica del girone | tutti contro tutti |
+| **Tutti contro tutti** | niente: è una gara unica con tutti in campo insieme | solo la classifica finale |
+| **Scontri diretti** | ogni partecipante affronta gli altri una volta sola, `n(n-1)/2` partite divise in giornate, senza ritorno | elenco incontri + classifica |
+| **Eliminazione diretta** | tabellone con teste di serie e passaggi automatici, `n-1` partite | turni affiancati, scorrevoli |
+
+Con 10 partecipanti: scontri diretti fa 45 partite in 9 giornate, 9 incontri a testa; eliminazione
+diretta fa un tabellone da 16 con 4 turni, 9 partite e 6 passaggi automatici al primo turno.
+La previsione esatta compare nella finestra di generazione prima di confermare.
 
 Gli incontri si gestiscono da **Admin ▸ Calendario**, scegliendo la disciplina dal menu in alto.
 Ogni lato di un incontro può essere una squadra, una nazione o un atleta (riferimenti `sqd:`,

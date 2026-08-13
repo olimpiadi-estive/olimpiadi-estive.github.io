@@ -368,8 +368,8 @@ function generaSquadre_(p) {
 /** open/girone sono i vecchi nomi: li normalizziamo. */
 function formatoDi_(s) {
   var f = String((s && s.formato) || '').toLowerCase();
-  if (f === 'open' || f === '') return 'classifica';
-  if (f === 'girone') return 'tutti';
+  if (f === 'girone') return 'scontro';
+  if (f === '' || f === 'open' || f === 'classifica') return 'tutti';
   return f;
 }
 
@@ -458,8 +458,8 @@ function generaCalendario_(p) {
   if (!s) throw new Error('Disciplina non trovata');
 
   var formato = String(p.formato || '').toLowerCase() || formatoDi_(s);
-  if (formato === 'classifica') {
-    throw new Error('La gara unica non prevede incontri: registra direttamente la classifica finale.');
+  if (formato === 'tutti') {
+    throw new Error('Tutti contro tutti è una gara unica: non prevede incontri, registra la classifica finale.');
   }
 
   var fonte = p.fonte || (s.tipo === 'squadra' || s.tipo === 'coppia' ? 'squadre'
@@ -490,7 +490,7 @@ function generaCalendario_(p) {
         });
       }
     }
-  } else if (formato === 'tutti') {
+  } else { // scontri diretti: tutti contro tutti in gare singole, senza ritorno
     var tot = n * (n - 1) / 2;
     if (tot > 120) throw new Error('Sarebbero ' + tot + ' partite: troppe. Riduci i partecipanti o dividi in gruppi.');
     var giornate = roundRobin_(refs);
@@ -501,10 +501,6 @@ function generaCalendario_(p) {
           A: giornate[g][j].A, B: giornate[g][j].B
         });
       }
-    }
-  } else { // scontro
-    for (var k = 0; k + 1 < n; k += 2) {
-      partite.push({ fase: 'Scontri', round: 1, ordine: (k / 2) + 1, A: refs[k], B: refs[k + 1] });
     }
   }
 
@@ -759,13 +755,13 @@ function seedDemo() {
   }).id;
   var sp2 = upsert_('SPORT', {
     nome: 'Torneo di Racchettoni', icona: '🏓', categoria: 'Spiaggia', tipo: 'individuale',
-    formato: 'tutti', stato: 'programmato', ordine: 2, data: '2026-08-14T15:00',
-    descrizione: 'Tutti contro tutti, ognuno affronta ogni avversario.',
+    formato: 'scontro', stato: 'programmato', ordine: 2, data: '2026-08-14T15:00',
+    descrizione: 'Scontri diretti: ognuno affronta ogni avversario una volta.',
     regolamento: '1. Partite a 11 punti\n2. Cambio battuta ogni 2 punti\n3. Il vento non è una scusa'
   }).id;
   var sp3 = upsert_('SPORT', {
     nome: 'Tuffo Artistico', icona: '🤿', categoria: 'Acqua', tipo: 'individuale',
-    formato: 'classifica', stato: 'programmato', ordine: 3, data: '2026-08-14T18:00',
+    formato: 'tutti', stato: 'programmato', ordine: 3, data: '2026-08-14T18:00',
     descrizione: 'Gara unica, una sola discesa, giuria impietosa.',
     regolamento: '- Un solo tentativo\n- Voto da 1 a 10\n- La bomba vale doppio'
   }).id;

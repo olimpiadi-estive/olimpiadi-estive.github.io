@@ -20,29 +20,25 @@ export const zonaLabel = z => ZONE.find(x => x.v === z)?.l || '—';
 /** Formati di calendario disponibili per disciplina. */
 export const FORMATI = [
   {
-    v: 'classifica', l: 'Gara unica', genera: false,
-    desc: 'Si gareggia tutti insieme una volta sola e si registra la classifica finale.',
+    v: 'tutti', l: 'Tutti contro tutti', genera: false,
+    desc: 'Gara unica: tutti gareggiano insieme nello stesso momento e si registra la classifica finale.',
   },
   {
-    v: 'tutti', l: 'Tutti contro tutti', genera: true,
-    desc: 'Ogni partecipante affronta tutti gli altri, con classifica del gruppo.',
+    v: 'scontro', l: 'Scontri diretti', genera: true,
+    desc: 'Ognuno affronta ogni avversario una volta sola, in gare singole senza ritorno.',
   },
   {
     v: 'tabellone', l: 'Eliminazione diretta', genera: true,
     desc: 'Turni a eliminazione: chi vince passa automaticamente al turno successivo.',
   },
-  {
-    v: 'scontro', l: 'Scontri liberi', genera: true,
-    desc: 'Sfide uno contro uno accoppiate a mano, senza struttura.',
-  },
 ];
 
-/** I vecchi valori 'open' e 'girone' restano leggibili. */
+/** Il valore vuoto e i vecchi nomi restano leggibili. */
 export function formatoDi(sportObj) {
   const f = String(sportObj?.formato || '').toLowerCase();
-  if (f === 'open' || f === '') return 'classifica';
-  if (f === 'girone') return 'tutti';
-  return FORMATI.some(x => x.v === f) ? f : 'classifica';
+  if (f === 'girone') return 'scontro';
+  if (f === '' || f === 'open' || f === 'classifica') return 'tutti';
+  return FORMATI.some(x => x.v === f) ? f : 'tutti';
 }
 
 export const formatoMeta = f => FORMATI.find(x => x.v === f) || FORMATI[0];
