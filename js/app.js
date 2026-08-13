@@ -3,12 +3,13 @@ import { store } from './store.js';
 import { fmtTime, toast, esc } from './utils.js';
 import {
   home, sportList, sportDetail, nazioniList, nazioneDetail,
-  squadreList, squadraDetail, atletiList, classificaView,
+  squadreList, squadraDetail, atletiList, classificaView, calendarioView,
 } from './views/public.js';
 import { admin } from './views/admin.js';
 
 const ROUTES = [
   [/^\/?$/, home],
+  [/^\/calendario$/, calendarioView],
   [/^\/sport$/, sportList],
   [/^\/sport\/(.+)$/, sportDetail, ['id']],
   [/^\/nazioni$/, nazioniList],

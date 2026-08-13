@@ -4,8 +4,8 @@ import { fetchState } from './api.js';
 const LS_CACHE = 'oee.cache.v2';
 
 const EMPTY = {
-  nazioni: [], atleti: [], sport: [], squadre: [], risultati: [], incontri: [],
-  config: {}, rev: 0,
+  nazioni: [], atleti: [], sport: [], squadre: [], iscrizioni: [],
+  risultati: [], incontri: [], config: {}, rev: 0,
 };
 
 /** Sottocategorie geografiche delle nazioni. Le squadre non le seguono. */
@@ -19,13 +19,44 @@ export const zonaLabel = z => ZONE.find(x => x.v === z)?.l || '—';
 
 /** Formati di calendario disponibili per disciplina. */
 export const FORMATI = [
-  { v: 'open', l: 'Classifica aperta', desc: 'Nessun incontro: tutti gareggiano e si registra l\'ordine d\'arrivo.' },
-  { v: 'scontro', l: 'Scontri diretti', desc: 'Elenco di sfide uno contro uno, senza struttura a eliminazione.' },
-  { v: 'tabellone', l: 'Tabellone a eliminazione', desc: 'Turni successivi: chi vince avanza al turno seguente.' },
-  { v: 'girone', l: 'Girone all\'italiana', desc: 'Tutti contro tutti con classifica a punti per vittorie e pareggi.' },
+  {
+    v: 'classifica', l: 'Gara unica', genera: false,
+    desc: 'Si gareggia tutti insieme una volta sola e si registra la classifica finale.',
+  },
+  {
+    v: 'tutti', l: 'Tutti contro tutti', genera: true,
+    desc: 'Ogni partecipante affronta tutti gli altri, con classifica del gruppo.',
+  },
+  {
+    v: 'tabellone', l: 'Eliminazione diretta', genera: true,
+    desc: 'Turni a eliminazione: chi vince passa automaticamente al turno successivo.',
+  },
+  {
+    v: 'scontro', l: 'Scontri liberi', genera: true,
+    desc: 'Sfide uno contro uno accoppiate a mano, senza struttura.',
+  },
 ];
 
-export const formatoLabel = f => FORMATI.find(x => x.v === f)?.l || 'Classifica aperta';
+/** I vecchi valori 'open' e 'girone' restano leggibili. */
+export function formatoDi(sportObj) {
+  const f = String(sportObj?.formato || '').toLowerCase();
+  if (f === 'open' || f === '') return 'classifica';
+  if (f === 'girone') return 'tutti';
+  return FORMATI.some(x => x.v === f) ? f : 'classifica';
+}
+
+export const formatoMeta = f => FORMATI.find(x => x.v === f) || FORMATI[0];
+export const formatoLabel = s => formatoMeta(typeof s === 'string' ? s : formatoDi(s)).l;
+
+/** Stati di una disciplina. 'annullato' per gli sport che saltano. */
+export const STATI_SPORT = [
+  { v: 'programmato', l: 'Programmato' },
+  { v: 'in corso', l: 'In corso' },
+  { v: 'completato', l: 'Completato' },
+  { v: 'annullato', l: 'Annullato' },
+];
+
+export const isAnnullato = s => String(s?.stato || '').toLowerCase() === 'annullato';
 
 export const STATI_INCONTRO = [
   { v: 'programmato', l: 'Programmato' },
@@ -169,6 +200,67 @@ export function refEntity(ref) {
   return { ...p, nome: a.nome, emoji: '🏃', colore: n?.colore || '#68789a', href: '#/atleti' };
 }
 
+/* ---------- iscrizioni per disciplina ---------- */
+
+/** Atleti registrati a una disciplina, nell'ordine di seed. */
+export function iscrittiDiSport(sportId) {
+  return store.data.iscrizioni
+    .filter(i => String(i.sportId) === String(sportId))
+    .sort((a, b) => (Number(a.seed) || 999) - (Number(b.seed) || 999))
+    .map(i => atleta(i.atletaId))
+    .filter(Boolean);
+}
+
+export function isIscritto(sportId, atletaId) {
+  return store.data.iscrizioni.some(i =>
+    String(i.sportId) === String(sportId) && String(i.atletaId) === String(atletaId));
+}
+
+/** Discipline a cui un atleta è iscritto. */
+export function sportDiAtleta(atletaId) {
+  return store.data.iscrizioni
+    .filter(i => String(i.atletaId) === String(atletaId))
+    .map(i => sport(i.sportId))
+    .filter(Boolean);
+}
+
+/** Squadre di una disciplina (le squadre sono per sport). */
+export function squadreDiSport(sportId) {
+  return squadreSorted().filter(s => String(s.sportId) === String(sportId));
+}
+
+/** Squadre senza disciplina: create prima che le squadre diventassero per sport. */
+export function squadreSenzaSport() {
+  return squadreSorted().filter(s => !s.sportId);
+}
+
+/**
+ * Partecipanti di una disciplina, come riferimenti del calendario.
+ * Segue il tipo dello sport: squadre, nazioni o iscritti.
+ */
+export function partecipantiDiSport(sportId, fonte) {
+  const s = sport(sportId);
+  const f = fonte || (s?.tipo === 'squadra' || s?.tipo === 'coppia' ? 'squadre'
+    : (s?.tipo === 'nazione' ? 'nazioni' : 'iscritti'));
+  if (f === 'squadre') return squadreDiSport(sportId).map(x => refOf('sqd', x.id));
+  if (f === 'nazioni') return nazioniSorted().map(x => refOf('naz', x.id));
+  return iscrittiDiSport(sportId).map(x => refOf('atl', x.id));
+}
+
+/** Opzioni ristrette ai partecipanti di una disciplina. */
+export function refOptionsSport(sportId, { vuoto = '— da definire —' } = {}) {
+  const out = [{ v: '', l: vuoto }];
+  squadreDiSport(sportId).forEach(s =>
+    out.push({ v: refOf('sqd', s.id), l: (s.emoji || '🛡️') + ' ' + s.nome, group: 'Squadre della disciplina' }));
+  iscrittiDiSport(sportId).forEach(a =>
+    out.push({ v: refOf('atl', a.id), l: a.nome, group: 'Iscritti alla disciplina' }));
+  if (out.length === 1) return refOptions({ vuoto });
+  // in coda tutto il resto, per i casi fuori standard
+  nazioniSorted().forEach(n =>
+    out.push({ v: refOf('naz', n.id), l: (n.emoji || '🚩') + ' ' + n.nome, group: 'Nazioni' }));
+  return out;
+}
+
 /** Opzioni per i select di calendario, raggruppate per tipo. */
 export function refOptions({ vuoto = '— da definire —' } = {}) {
   const out = [{ v: '', l: vuoto }];
@@ -198,6 +290,14 @@ export function atletiDiRisultato(r) {
   return [];
 }
 
+/**
+ * I punti per piazzamento sono opzionali: per ora le classifiche si ordinano
+ * a medaglie, come il medagliere olimpico. Si attivano da Admin ▸ Impostazioni.
+ */
+export function puntiAttivi() {
+  return /^(si|sì|yes|true|1)$/i.test(String(store.data.config?.puntiAttivi || ''));
+}
+
 /** Schema punti: override per sport, altrimenti quello globale. */
 export function puntiSchema(sportObj) {
   const parse = s => String(s || '').split(/[,;\s]+/).map(Number).filter(n => !isNaN(n));
@@ -217,27 +317,42 @@ export function puntiPerPosizione(sportObj, posizione) {
 
 /* ---------- classifiche ---------- */
 
-const vuotaRiga = extra => ({ oro: 0, argento: 0, bronzo: 0, punti: 0, gare: 0, ...extra });
+const vuotaRiga = extra => ({
+  oro: 0, argento: 0, bronzo: 0, punti: 0, gare: 0, piazzamenti: 0, ...extra,
+});
 
+/** Medaglie ai primi tre della classifica di ogni disciplina. */
 function contaMedaglia(row, pos) {
   if (pos === 1) row.oro++;
   else if (pos === 2) row.argento++;
   else if (pos === 3) row.bronzo++;
+  else if (pos > 3) row.piazzamenti++;
 }
+
+const chiaveRiga = row => (puntiAttivi()
+  ? [row.punti, row.oro, row.argento, row.bronzo]
+  : [row.oro, row.argento, row.bronzo, row.piazzamenti]).join('|');
 
 function assegnaPosizioni(list) {
   let prev = null, rank = 0;
   list.forEach((row, i) => {
-    const key = [row.punti, row.oro, row.argento, row.bronzo].join('|');
+    const key = chiaveRiga(row);
     if (key !== prev) { rank = i + 1; prev = key; }
     row.pos = rank;
   });
   return list;
 }
 
-const perPunti = (a, b) =>
-  b.punti - a.punti || b.oro - a.oro || b.argento - a.argento || b.bronzo - a.bronzo ||
-  (a.nome || '').localeCompare(b.nome || '', 'it');
+/**
+ * Ordinamento a medaglie (oro, poi argento, poi bronzo, poi altri piazzamenti).
+ * Se i punti sono attivi vengono davanti a tutto.
+ */
+const perPunti = (a, b) => {
+  if (puntiAttivi() && b.punti !== a.punti) return b.punti - a.punti;
+  return b.oro - a.oro || b.argento - a.argento || b.bronzo - a.bronzo ||
+    b.piazzamenti - a.piazzamenti ||
+    (a.nome || '').localeCompare(b.nome || '', 'it');
+};
 
 /**
  * Medagliere nazioni. I risultati assegnati a una squadra non entrano qui:
@@ -404,38 +519,69 @@ export function gironeStandings(sportId) {
     a.nome.localeCompare(b.nome, 'it'));
 }
 
-/** Prossimi impegni su tutte le discipline (incontri con data + discipline datate). */
-export function prossimiImpegni(n = 6) {
-  const now = Date.now();
+/**
+ * Tutti gli eventi datati: un incontro per riga, più le discipline
+ * che hanno una data ma nessun incontro in calendario.
+ */
+export function eventiDatati() {
   const items = [];
   store.data.incontri.forEach(i => {
-    if (!i.data || isConcluso(i)) return;
+    const s = sport(i.sportId);
+    if (isAnnullato(s)) return;
     const t = new Date(i.data).getTime();
-    if (isNaN(t) || t < now - 3 * 3600e3) return;
-    items.push({ t, tipo: 'incontro', incontro: i, sport: sport(i.sportId) });
+    if (!i.data || isNaN(t)) return;
+    items.push({ t, data: i.data, tipo: 'incontro', incontro: i, sport: s });
   });
   store.data.sport.forEach(s => {
-    if (!s.data || (s.stato || '').toLowerCase() === 'completato') return;
+    if (!s.data || isAnnullato(s)) return;
+    if (incontriDiSport(s.id).some(i => i.data)) return; // già rappresentata dai suoi incontri
     const t = new Date(s.data).getTime();
-    if (isNaN(t) || t < now - 3 * 3600e3) return;
-    items.push({ t, tipo: 'sport', sport: s });
+    if (isNaN(t)) return;
+    items.push({ t, data: s.data, tipo: 'sport', sport: s });
   });
-  return items.sort((a, b) => a.t - b.t).slice(0, n);
+  return items.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * Calendario raggruppato per giorno: compaiono solo i giorni con almeno un evento.
+ * @returns {Array<{key:string, date:Date, eventi:Array}>}
+ */
+export function giorniCalendario() {
+  const giorni = new Map();
+  eventiDatati().forEach(ev => {
+    const key = String(ev.data).slice(0, 10); // YYYY-MM-DD
+    if (!giorni.has(key)) giorni.set(key, { key, date: new Date(ev.t), eventi: [] });
+    giorni.get(key).eventi.push(ev);
+  });
+  return [...giorni.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** Prossimi impegni su tutte le discipline. */
+export function prossimiImpegni(n = 6) {
+  const soglia = Date.now() - 3 * 3600e3;
+  return eventiDatati()
+    .filter(ev => ev.t >= soglia && !(ev.tipo === 'incontro' && isConcluso(ev.incontro)) &&
+      !(ev.tipo === 'sport' && (ev.sport.stato || '').toLowerCase() === 'completato'))
+    .slice(0, n);
 }
 
 /* ---------- statistiche ---------- */
 
 export function statsGlobali() {
   const s = store.data.sport;
+  const stato = x => (x.stato || '').toLowerCase();
+  const attivi = s.filter(x => stato(x) !== 'annullato');
   return {
     nazioni: store.data.nazioni.length,
     atleti: store.data.atleti.length,
     squadre: store.data.squadre.length,
-    sport: s.length,
-    completati: s.filter(x => (x.stato || '').toLowerCase() === 'completato').length,
-    inCorso: s.filter(x => (x.stato || '').toLowerCase() === 'in corso').length,
+    sport: attivi.length,
+    annullati: s.length - attivi.length,
+    completati: s.filter(x => stato(x) === 'completato').length,
+    inCorso: s.filter(x => stato(x) === 'in corso').length,
     risultati: store.data.risultati.length,
     incontri: store.data.incontri.length,
+    iscrizioni: store.data.iscrizioni.length,
   };
 }
 

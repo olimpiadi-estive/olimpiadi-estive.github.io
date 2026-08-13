@@ -38,6 +38,19 @@ export function fmtTime(ts) {
   return new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Solo l'ora di un valore datetime-local ('2026-08-14T15:30' -> '15:30'). */
+export function fmtOra(v) {
+  const m = /[T ](\d{2}):(\d{2})/.exec(String(v || ''));
+  return m ? m[1] + ':' + m[2] : '';
+}
+
+/** Giorno in forma lunga: 'venerdì 14 agosto'. */
+export function fmtGiorno(v) {
+  const d = v instanceof Date ? v : new Date(v);
+  if (isNaN(d)) return String(v || '');
+  return d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
 export const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 export function ordinal(pos) {

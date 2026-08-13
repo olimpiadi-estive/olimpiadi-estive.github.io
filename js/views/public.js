@@ -7,13 +7,18 @@ import {
   risultatiDiSport, atletiDiRisultato, incontriDiSport, fasiDiSport,
   gironeStandings, esitoIncontro, isConcluso, puntiIncontro,
   nazione, atleta, squadra, sport as getSport,
-  puntiPerPosizione, puntiSchema, refEntity, ZONE, zonaLabel, formatoLabel, FORMATI,
+  puntiPerPosizione, puntiSchema, puntiAttivi, refEntity, ZONE, zonaLabel,
+  FORMATI, formatoLabel, formatoDi, formatoMeta, isAnnullato,
+  iscrittiDiSport, squadreDiSport, giorniCalendario,
 } from '../store.js';
-import { esc, richText, fmtDate, MEDAL, ordinal, textOn, slug } from '../utils.js';
+import { esc, richText, fmtDate, fmtOra, fmtGiorno, MEDAL, ordinal, textOn, slug } from '../utils.js';
 
 /* ---------- frammenti riusabili ---------- */
 
-const STATI = { 'programmato': 'programmato', 'in corso': 'incorso', 'completato': 'completato', 'concluso': 'completato' };
+const STATI = {
+  'programmato': 'programmato', 'in corso': 'incorso', 'completato': 'completato',
+  'concluso': 'completato', 'annullato': 'annullato',
+};
 
 export function statoPill(stato) {
   const s = (stato || 'programmato').toLowerCase();
@@ -82,6 +87,13 @@ function entitaChipRisultato(r, small = true) {
   return r.squadraId ? squadraChip(squadra(r.squadraId), small) : flagChip(nazione(r.nazioneId), small);
 }
 
+/** Etichetta sintetica di una riga di classifica: punti se attivi, altrimenti medaglie. */
+function badgeRiga(r) {
+  if (puntiAttivi()) return r.punti + ' pt';
+  const tot = r.oro + r.argento + r.bronzo;
+  return tot ? '🥇' + r.oro + ' 🥈' + r.argento + ' 🥉' + r.bronzo : '—';
+}
+
 /* ---------- HOME ---------- */
 
 export const home = {
@@ -129,14 +141,7 @@ export const home = {
 
     ${cls.length ? `
     <div class="section-head"><h2>Podio nazioni</h2><a class="small" href="#/classifica">Classifiche →</a></div>
-    <div class="card"><div class="tbl-wrap"><table>
-      <thead><tr><th class="num">#</th><th>Nazione</th><th class="num">🥇</th><th class="num">🥈</th><th class="num">🥉</th><th class="num">Punti</th></tr></thead>
-      <tbody>${cls.map(r => `<tr class="podio-${r.pos}">
-        <td class="num">${MEDAL[r.pos] || r.pos}</td>
-        <td>${flagChip(r.nazione)}</td>
-        <td class="num">${r.oro}</td><td class="num">${r.argento}</td><td class="num">${r.bronzo}</td>
-        <td class="num pts">${r.punti}</td></tr>`).join('')}</tbody>
-    </table></div></div>` : ''}
+    <div class="card">${tabellaMedagliere(cls, 'Nazione', r => flagChip(r.nazione))}</div>` : ''}
 
     ${attivi.length ? `
     <div class="section-head"><h2>🔴 In corso adesso</h2></div>
@@ -165,7 +170,8 @@ export const home = {
 function sportCard(s) {
   const nRis = risultatiDiSport(s.id).length;
   const nInc = incontriDiSport(s.id).length;
-  return `<a class="card link sport-card" href="#/sport/${esc(s.id)}">
+  const nIsc = iscrittiDiSport(s.id).length;
+  return `<a class="card link sport-card ${isAnnullato(s) ? 'annullato' : ''}" href="#/sport/${esc(s.id)}">
     <div class="head">
       <span class="ico">${esc(s.icona || '🏅')}</span>
       <span class="grow"><h3 style="margin:0">${esc(s.nome)}</h3>
@@ -174,7 +180,7 @@ function sportCard(s) {
       ${statoPill(s.stato)}
     </div>
     <p>${esc((s.descrizione || 'Nessuna descrizione.').slice(0, 160))}</p>
-    <div class="small muted">${esc(formatoLabel(s.formato))}${nInc ? ' · ' + nInc + ' incontri' : ''}${nRis ? ' · ' + nRis + ' risultati' : ''}${s.luogo ? ' · 📍 ' + esc(s.luogo) : ''}</div>
+    <div class="small muted">${esc(formatoLabel(s))}${nIsc ? ' · ' + nIsc + ' iscritti' : ''}${nInc ? ' · ' + nInc + ' incontri' : ''}${nRis ? ' · ' + nRis + ' risultati' : ''}${s.luogo ? ' · 📍 ' + esc(s.luogo) : ''}</div>
   </a>`;
 }
 
@@ -191,6 +197,7 @@ export const sportList = {
         <option value="programmato">Programmati</option>
         <option value="in corso">In corso</option>
         <option value="completato">Completati</option>
+        <option value="annullato">Annullati</option>
       </select>
       <select id="fFormato" aria-label="Filtra per formato">
         <option value="">Tutti i formati</option>
@@ -209,7 +216,7 @@ export const sportList = {
       const html = sportSorted().filter(s =>
         (!term || slug(s.nome + ' ' + (s.categoria || '') + ' ' + (s.descrizione || '')).includes(term)) &&
         (!fs.value || (s.stato || 'programmato').toLowerCase() === fs.value) &&
-        (!ff.value || (s.formato || 'open') === ff.value)
+        (!ff.value || formatoDi(s) === ff.value)
       ).map(sportCard).join('');
       document.getElementById('sportGrid').innerHTML = html ||
         '<div class="empty">Nessun risultato per questi filtri.</div>';
@@ -286,25 +293,101 @@ function gironeTable(sportId) {
 
 function calendarioPane(s) {
   const incontri = incontriDiSport(s.id);
-  const formato = s.formato || 'open';
-  const meta = FORMATI.find(f => f.v === formato);
+  const formato = formatoDi(s);
+  const meta = formatoMeta(formato);
+  const testa = `<div class="alert info"><b>${esc(meta.l)}.</b> ${esc(meta.desc)}</div>`;
 
   if (!incontri.length) {
-    return `<div class="card">
-      <div class="alert info"><b>${esc(formatoLabel(formato))}.</b> ${esc(meta?.desc || '')}</div>
-      <div class="empty">Nessun incontro in calendario.</div>
+    return `<div class="card">${testa}
+      <div class="empty">${formato === 'classifica'
+        ? 'Gara unica: non ci sono incontri, si registra la classifica finale.'
+        : 'Nessun incontro in calendario.'}</div>
     </div>`;
   }
 
   let body;
   if (formato === 'tabellone') body = bracketView(s.id);
-  else if (formato === 'girone') body = listaFasi(s.id) + gironeTable(s.id);
+  else if (formato === 'tutti') body = listaFasi(s.id) + gironeTable(s.id);
   else body = listaFasi(s.id);
 
+  return `<div class="card">${testa}${body}</div>`;
+}
+
+/** Elenco degli iscritti a una disciplina, con le squadre se ci sono. */
+function iscrittiPane(s) {
+  const isc = iscrittiDiSport(s.id);
+  const sqd = squadreDiSport(s.id);
   return `<div class="card">
-    <div class="alert info"><b>${esc(formatoLabel(formato))}.</b> ${esc(meta?.desc || '')}</div>
-    ${body}
+    ${sqd.length ? `
+      <h3>Squadre (${sqd.length})</h3>
+      <div class="list" style="margin-bottom:1rem">${sqd.map(q => {
+        const rosa = atletiDiSquadra(q.id);
+        return `<a class="row-item" href="#/squadre/${esc(q.id)}">
+          <span style="font-size:1.4rem">${esc(q.emoji || '🛡️')}</span>
+          <span class="grow"><b>${esc(q.nome)}</b>
+            <span class="small muted">${esc(rosa.map(a => a.nome).join(' · ') || 'rosa da comporre')}</span></span>
+        </a>`;
+      }).join('')}</div>` : ''}
+
+    <h3>Iscritti (${isc.length})</h3>
+    ${isc.length ? `<div class="list">${isc.map(a => `
+      <div class="row-item">${avatar(a)}
+        <span class="grow"><b>${esc(a.nome)}</b>
+          <span class="small muted">${esc(a.ruolo || 'Atleta')}</span></span>
+        ${flagChip(nazione(a.nazioneId), true)}
+      </div>`).join('')}</div>`
+      : '<div class="empty">Nessun iscritto registrato per questa disciplina.</div>'}
   </div>`;
+}
+
+/* ---------- CALENDARIO GENERALE ---------- */
+
+export const calendarioView = {
+  render() {
+    const giorni = giorniCalendario();
+    if (!giorni.length) {
+      return `<h1>Calendario</h1>` + empty('🗓️', 'Nessun evento con data.',
+        'Metti una data alle discipline o genera i calendari da <a href="#/admin">Admin</a>.');
+    }
+    const oggi = new Date().toISOString().slice(0, 10);
+
+    return `
+    <h1>Calendario</h1>
+    <p class="muted small">Compaiono solo i giorni con almeno un evento.</p>
+    ${giorni.map(g => `
+      <div class="giorno ${g.key === oggi ? 'oggi' : ''}">
+        <div class="giorno-head">
+          <h2>${esc(fmtGiorno(g.date))}</h2>
+          <span class="small muted">${g.eventi.length} event${g.eventi.length === 1 ? 'o' : 'i'}${g.key === oggi ? ' · oggi' : ''}</span>
+        </div>
+        <div class="card"><div class="slots">${g.eventi.map(rigaEvento).join('')}</div></div>
+      </div>`).join('')}`;
+  },
+};
+
+function rigaEvento(ev) {
+  const s = ev.sport;
+  const ora = fmtOra(ev.data) || '—';
+  if (ev.tipo === 'sport') {
+    return `<a class="slot" href="#/sport/${esc(s.id)}">
+      <b class="ora">${esc(ora)}</b>
+      <span class="grow"><b>${esc(s.icona || '🏅')} ${esc(s.nome)}</b>
+        <span class="small muted">${esc(formatoLabel(s))}${s.luogo ? ' · 📍 ' + esc(s.luogo) : ''}</span></span>
+      ${statoPill(s.stato)}
+    </a>`;
+  }
+  const i = ev.incontro;
+  const a = refEntity(i.latoA), b = refEntity(i.latoB);
+  const nome = (a || b)
+    ? `${a ? esc(a.emoji + ' ' + a.nome) : '<i class="muted">?</i>'} <span class="vs">vs</span> ${b ? esc(b.emoji + ' ' + b.nome) : '<i class="muted">?</i>'}`
+    : '<i class="muted">avversari da definire</i>';
+  const punteggio = isConcluso(i) ? `<b class="sc">${esc(i.punteggioA || '—')}-${esc(i.punteggioB || '—')}</b>` : '';
+  return `<a class="slot" href="#/sport/${esc(i.sportId)}">
+    <b class="ora">${esc(ora)}</b>
+    <span class="grow"><b>${nome}</b>
+      <span class="small muted">${esc(s?.icona || '🏅')} ${esc(s?.nome || '')}${i.fase ? ' · ' + esc(i.fase) : ''}${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}</span></span>
+    ${punteggio || statoPill(i.stato)}
+  </a>`;
 }
 
 export const sportDetail = {
@@ -313,7 +396,9 @@ export const sportDetail = {
     if (!s) return empty('❓', 'Disciplina non trovata.', '<a href="#/sport">Torna agli sport</a>');
     const ris = risultatiDiSport(s.id);
     const inc = incontriDiSport(s.id);
-    const pts = puntiSchema(s);
+    const isc = iscrittiDiSport(s.id);
+    const sqd = squadreDiSport(s.id);
+    const conPunti = puntiAttivi();
 
     return `
     <a class="back" href="#/sport">← Tutti gli sport</a>
@@ -325,17 +410,20 @@ export const sportDetail = {
         </span>
         ${statoPill(s.stato)}
       </div>
+      ${isAnnullato(s) ? '<div class="alert warn" style="margin-top:.7rem"><b>Disciplina annullata.</b> Non assegna medaglie e non compare in calendario.</div>' : ''}
       <div class="btn-row small muted" style="margin-top:.4rem">
-        <span class="chip">🗓️ ${esc(formatoLabel(s.formato))}</span>
+        <span class="chip">🗓️ ${esc(formatoLabel(s))}</span>
         ${s.data ? `<span class="chip">📅 ${esc(fmtDate(s.data))}</span>` : ''}
         ${s.luogo ? `<span class="chip">📍 ${esc(s.luogo)}</span>` : ''}
-        <span class="chip">🎯 Punti: ${pts.join(' / ')}</span>
+        ${isc.length ? `<span class="chip">👥 ${isc.length} iscritti</span>` : ''}
+        ${conPunti ? `<span class="chip">🎯 Punti: ${puntiSchema(s).join(' / ')}</span>` : '<span class="chip">🥇 Medaglie ai primi tre</span>'}
       </div>
     </div>
 
     <div class="tabs" role="tablist" style="margin-top:1rem">
       <button class="on" data-tab="cal" role="tab">Calendario (${inc.length})</button>
-      <button data-tab="ris" role="tab">Risultati (${ris.length})</button>
+      <button data-tab="ris" role="tab">Classifica (${ris.length})</button>
+      <button data-tab="isc" role="tab">Iscritti (${sqd.length ? sqd.length + ' sq.' : isc.length})</button>
       <button data-tab="desc" role="tab">Descrizione</button>
       <button data-tab="reg" role="tab">Regolamento</button>
     </div>
@@ -344,16 +432,19 @@ export const sportDetail = {
 
     <div class="card hide" data-pane="ris">
       ${ris.length ? `<div class="tbl-wrap"><table>
-        <thead><tr><th class="num">Pos</th><th>Chi</th><th>Assegna a</th><th>Risultato</th><th class="num">Punti</th></tr></thead>
+        <thead><tr><th class="num">Pos</th><th>Chi</th><th>Per</th><th>Risultato</th>
+          ${conPunti ? '<th class="num">Punti</th>' : ''}</tr></thead>
         <tbody>${ris.map(r => `<tr class="podio-${Number(r.posizione)}">
           <td class="num">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</td>
           <td><b>${esc(nomiRisultato(r))}</b>${r.note ? `<br><span class="small muted">${esc(r.note)}</span>` : ''}</td>
           <td>${entitaChipRisultato(r)}</td>
           <td>${esc(r.punteggio || '—')}</td>
-          <td class="num pts">${puntiPerPosizione(s, r.posizione)}</td>
+          ${conPunti ? `<td class="num pts">${puntiPerPosizione(s, r.posizione)}</td>` : ''}
         </tr>`).join('')}</tbody></table></div>`
-        : '<div class="empty">Nessun risultato registrato per questa disciplina.</div>'}
+        : '<div class="empty">Classifica non ancora registrata.</div>'}
     </div>
+
+    <div class="hide" data-pane="isc">${iscrittiPane(s)}</div>
     <div class="card hide" data-pane="desc">${richText(s.descrizione)}</div>
     <div class="card hide" data-pane="reg">
       <h3>Regolamento</h3>${richText(s.regolamento)}
@@ -393,7 +484,8 @@ export const nazioniList = {
     Le squadre invece sono miste e non seguono le zone.</p>
     ${gruppi.map(g => `
       <div class="section-head"><h2>${esc(g.titolo)}</h2>
-        <span class="small muted">${g.righe.reduce((s, r) => s + r.punti, 0)} punti</span></div>
+        <span class="small muted">🥇 ${g.righe.reduce((s, r) => s + r.oro, 0)} ·
+        ${g.righe.length} nazion${g.righe.length === 1 ? 'e' : 'i'}</span></div>
       <div class="grid cards">${g.righe.map(nazioneCard).join('')}</div>`).join('')}`;
   },
 };
@@ -407,9 +499,9 @@ function nazioneCard(r) {
       <span style="font-size:1.8rem">${esc(n.emoji || '🚩')}</span>
       <span style="flex:1;min-width:0"><h3 style="margin:0">${esc(n.nome)}</h3>
         <span class="small muted">${esc(n.citta || '')}</span></span>
-      <span class="pill" style="background:${esc(bg)};color:${textOn(bg)}">${r.punti} pt</span>
+      <span class="pill" style="background:${esc(bg)};color:${textOn(bg)}">${esc(badgeRiga(r))}</span>
     </div>
-    <div class="small muted">${roster.length} atlet${roster.length === 1 ? 'a' : 'i'} · 🥇${r.oro} 🥈${r.argento} 🥉${r.bronzo} · ${esc(zonaLabel(n.zona))}</div>
+    <div class="small muted">${roster.length} atlet${roster.length === 1 ? 'a' : 'i'} · ${r.pos}ª posizione · ${esc(zonaLabel(n.zona))}</div>
   </a>`;
 }
 
@@ -434,8 +526,8 @@ export const nazioneDetail = {
     </section>
     <div class="grid stats">
       <div class="card stat"><b>${row?.pos || '—'}</b><span>Posizione</span></div>
-      <div class="card stat"><b>${row?.punti || 0}</b><span>Punti</span></div>
       <div class="card stat"><b>${row?.oro || 0}</b><span>🥇 Ori</span></div>
+      <div class="card stat"><b>${(row?.oro || 0) + (row?.argento || 0) + (row?.bronzo || 0)}</b><span>Medaglie</span></div>
       <div class="card stat"><b>${roster.length}</b><span>Atleti</span></div>
     </div>
 
@@ -452,14 +544,13 @@ export const nazioneDetail = {
 
     <div class="section-head"><h2>Risultati individuali</h2></div>
     ${ris.length ? `<div class="card"><div class="tbl-wrap"><table>
-      <thead><tr><th class="num">Pos</th><th>Disciplina</th><th>Atleta</th><th class="num">Punti</th></tr></thead>
+      <thead><tr><th class="num">Pos</th><th>Disciplina</th><th>Atleta</th></tr></thead>
       <tbody>${ris.map(r => {
         const s = getSport(r.sportId);
         return `<tr class="podio-${Number(r.posizione)}">
           <td class="num">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</td>
           <td><a href="#/sport/${esc(r.sportId)}">${esc(s?.icona || '🏅')} ${esc(s?.nome || '—')}</a></td>
-          <td>${esc(nomiRisultato(r))}</td>
-          <td class="num pts">${puntiPerPosizione(s, r.posizione)}</td></tr>`;
+          <td>${esc(nomiRisultato(r))}</td></tr>`;
       }).join('')}</tbody></table></div></div>`
       : '<div class="empty">Nessun risultato registrato.</div>'}
     <p class="small muted">I punti delle squadre miste non entrano nel bilancio delle nazioni.</p>`;
@@ -478,8 +569,8 @@ export const squadreList = {
     return `
     ${roseNav('/squadre')}
     <h1>Squadre</h1>
-    <p class="muted small">Formazioni miste: i componenti arrivano da nazioni e zone diverse,
-    e i loro punti non entrano nel medagliere delle nazioni.</p>
+    <p class="muted small">Le squadre si creano per disciplina, a partire dagli iscritti, e sono miste:
+    i componenti arrivano da nazioni e zone diverse. Le loro medaglie non entrano nel medagliere delle nazioni.</p>
     <div class="grid cards">${cls.map(r => {
       const s = r.squadra;
       const bg = s.colore || '#1657c8';
@@ -490,9 +581,9 @@ export const squadreList = {
           <span style="font-size:1.8rem">${esc(s.emoji || '🛡️')}</span>
           <span style="flex:1;min-width:0"><h3 style="margin:0">${esc(s.nome)}</h3>
             <span class="small muted">${rosa.length} component${rosa.length === 1 ? 'e' : 'i'}</span></span>
-          <span class="pill" style="background:${esc(bg)};color:${textOn(bg)}">${r.punti} pt</span>
+          <span class="pill" style="background:${esc(bg)};color:${textOn(bg)}">${esc(badgeRiga(r))}</span>
         </div>
-        <div class="small muted">🥇${r.oro} 🥈${r.argento} 🥉${r.bronzo}</div>
+        <div class="small muted">${getSport(s.sportId) ? esc((getSport(s.sportId).icona || '') + ' ' + getSport(s.sportId).nome) : 'Squadra generica'}</div>
         <div style="margin-top:.45rem;display:flex;gap:.25rem;flex-wrap:wrap">
           ${nazioni.map(n => flagChip(n, true)).join('')}</div>
       </a>`;
@@ -525,8 +616,8 @@ export const squadraDetail = {
     </section>
     <div class="grid stats">
       <div class="card stat"><b>${row?.pos || '—'}</b><span>Posizione</span></div>
-      <div class="card stat"><b>${row?.punti || 0}</b><span>Punti</span></div>
       <div class="card stat"><b>${row?.oro || 0}</b><span>🥇 Ori</span></div>
+      <div class="card stat"><b>${(row?.oro || 0) + (row?.argento || 0) + (row?.bronzo || 0)}</b><span>Medaglie</span></div>
       <div class="card stat"><b>${rosa.length}</b><span>Componenti</span></div>
     </div>
 
@@ -554,13 +645,12 @@ export const squadraDetail = {
     ${ris.length ? `
     <div class="section-head"><h2>Risultati</h2></div>
     <div class="card"><div class="tbl-wrap"><table>
-      <thead><tr><th class="num">Pos</th><th>Disciplina</th><th class="num">Punti</th></tr></thead>
+      <thead><tr><th class="num">Pos</th><th>Disciplina</th></tr></thead>
       <tbody>${ris.map(r => {
         const sp = getSport(r.sportId);
         return `<tr class="podio-${Number(r.posizione)}">
           <td class="num">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</td>
-          <td><a href="#/sport/${esc(r.sportId)}">${esc(sp?.icona || '🏅')} ${esc(sp?.nome || '—')}</a></td>
-          <td class="num pts">${puntiPerPosizione(sp, r.posizione)}</td></tr>`;
+          <td><a href="#/sport/${esc(r.sportId)}">${esc(sp?.icona || '🏅')} ${esc(sp?.nome || '—')}</a></td></tr>`;
       }).join('')}</tbody></table></div></div>` : ''}`;
   },
 };
@@ -627,17 +717,24 @@ function atletaRow(a) {
 /* ---------- CLASSIFICHE ---------- */
 
 function tabellaMedagliere(rows, colonna, chipFn) {
+  const conPunti = puntiAttivi();
   return `<div class="tbl-wrap"><table>
     <thead><tr><th class="num">#</th><th>${esc(colonna)}</th><th class="num">🥇</th><th class="num">🥈</th>
-      <th class="num">🥉</th><th class="num">Gare</th><th class="num">Punti</th></tr></thead>
+      <th class="num">🥉</th><th class="num">Tot</th><th class="num">Gare</th>
+      ${conPunti ? '<th class="num">Punti</th>' : ''}</tr></thead>
     <tbody>${rows.map(r => `<tr class="${r.pos <= 3 && r.gare ? 'podio-' + r.pos : ''}">
       <td class="num">${r.gare && MEDAL[r.pos] ? MEDAL[r.pos] : r.pos}</td>
       <td>${chipFn(r)}</td>
       <td class="num">${r.oro}</td><td class="num">${r.argento}</td><td class="num">${r.bronzo}</td>
+      <td class="num"><b>${r.oro + r.argento + r.bronzo}</b></td>
       <td class="num muted">${r.gare}</td>
-      <td class="num pts">${r.punti}</td></tr>`).join('')}</tbody>
+      ${conPunti ? `<td class="num pts">${r.punti}</td>` : ''}</tr>`).join('')}</tbody>
   </table></div>`;
 }
+
+const notaOrdinamento = () => puntiAttivi()
+  ? `Ordinata per punti (${puntiSchema(null).join(' / ')} per posizione), poi per medaglie.`
+  : 'Ordinata a medaglie: prima gli ori, poi argenti e bronzi. I punti per piazzamento sono disattivati.';
 
 export const classificaView = {
   render() {
@@ -658,8 +755,8 @@ export const classificaView = {
 
     <div class="card" data-pane="naz">
       ${tabellaMedagliere(cls, 'Nazione', r => flagChip(r.nazione))}
-      <p class="small muted" style="margin-top:.7rem">Punti per posizione: ${puntiSchema(null).join(' / ')}.
-      Parità risolta dal numero di ori. Le gare vinte dalle squadre miste non compaiono qui.</p>
+      <p class="small muted" style="margin-top:.7rem">${notaOrdinamento()}
+      Le medaglie delle squadre non compaiono qui: le squadre sono miste.</p>
     </div>
 
     <div class="card hide" data-pane="zone">
@@ -675,16 +772,9 @@ export const classificaView = {
     </div>
 
     <div class="card hide" data-pane="atl">
-      ${atl.length ? `<div class="tbl-wrap"><table>
-        <thead><tr><th class="num">#</th><th>Atleta</th><th>Nazione</th><th class="num">🥇</th><th class="num">Gare</th><th class="num">Punti</th></tr></thead>
-        <tbody>${atl.map(r => `<tr class="${r.pos <= 3 ? 'podio-' + r.pos : ''}">
-          <td class="num">${MEDAL[r.pos] || r.pos}</td>
-          <td><b>${esc(r.atleta.nome)}</b></td>
-          <td>${flagChip(nazione(r.atleta.nazioneId), true)}</td>
-          <td class="num">${r.oro}</td><td class="num muted">${r.gare}</td>
-          <td class="num pts">${r.punti}</td></tr>`).join('')}</tbody>
-      </table></div>
-      <p class="small muted" style="margin-top:.7rem">Somma dei punti presi con la nazione e con le squadre miste.</p>`
+      ${atl.length ? tabellaMedagliere(atl, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
+          ${flagChip(nazione(r.atleta.nazioneId), true)}`) +
+        `<p class="small muted" style="margin-top:.7rem">Medaglie prese sia con la nazione sia con le squadre.</p>`
         : '<div class="empty">Nessun risultato individuale registrato.</div>'}
     </div>`;
   },

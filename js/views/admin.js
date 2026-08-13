@@ -3,26 +3,30 @@ import { auth, mutate, checkPin, diagnose } from '../api.js';
 import {
   store, nazioniSorted, atletiSorted, squadreSorted, sportSorted,
   atletiDiNazione, atletiDiSquadra, risultatiDiSport, incontriDiSport,
+  iscrittiDiSport, isIscritto, squadreDiSport, partecipantiDiSport,
   nazione, atleta, squadra, sport as getSport, incontro,
-  puntiSchema, refOptions, refEntity, idList,
-  ZONE, FORMATI, STATI_INCONTRO, formatoLabel, zonaLabel,
+  puntiSchema, puntiAttivi, refOptions, refOptionsSport, refEntity, idList,
+  ZONE, FORMATI, STATI_SPORT, STATI_INCONTRO,
+  formatoDi, formatoLabel, formatoMeta, zonaLabel, isAnnullato,
 } from '../store.js';
-import { esc, toast, fmtDate, ordinal, MEDAL } from '../utils.js';
+import { esc, toast, fmtDate, ordinal, MEDAL, slug } from '../utils.js';
 import { openModal, confirmModal, renderFields, formValues } from '../ui.js';
 import { avatar, statoPill, nomiRisultato } from './public.js';
 
-let tab = 'nazioni';
-let calSportId = '';
+let tab = 'sport';
+let calSportId = '';   // disciplina selezionata in Calendario
+let iscSportId = '';   // disciplina selezionata in Iscritti
+let sqdSportId = '';   // disciplina selezionata in Squadre
 
 /* ---------- descrittori campi ---------- */
 
 const nazioneFields = () => [
   { k: 'nome', label: 'Nome nazione', required: true, hint: 'Es. Repubblica di Bologna' },
-  { k: 'citta', label: 'Città di residenza', hint: 'La città reale dei partecipanti' },
+  { k: 'citta', label: 'Città di residenza' },
   {
     k: 'zona', label: 'Zona', type: 'select', required: true,
     options: [{ v: '', l: '— seleziona —' }, ...ZONE.map(z => ({ v: z.v, l: z.emoji + ' ' + z.l }))],
-    hint: 'Sottocategoria geografica delle nazioni. Le squadre miste non la seguono.',
+    hint: 'Sottocategoria delle nazioni. Le squadre non la seguono.',
   },
   { k: 'emoji', label: 'Emoji / bandiera', def: '🚩' },
   { k: 'colore', label: 'Colore', type: 'color', def: '#0b3d91' },
@@ -37,23 +41,31 @@ const atletaFields = () => [
       v: n.id, l: n.nome + ' (' + zonaLabel(n.zona) + ')',
     }))],
   },
-  { k: 'ruolo', label: 'Ruolo / soprannome', hint: 'Es. Capitano, Portabandiera' },
+  { k: 'ruolo', label: 'Ruolo / soprannome' },
   { k: 'note', label: 'Note', type: 'textarea', rows: 2 },
 ];
 
-const squadraFields = () => [
+const squadraFields = (sportId) => [
+  {
+    k: 'sportId', label: 'Disciplina', type: 'select', required: true, def: sportId || '',
+    options: [{ v: '', l: '— seleziona —' }, ...sportSorted().map(s => ({
+      v: s.id, l: (s.icona || '') + ' ' + s.nome,
+    }))],
+    hint: 'Le squadre valgono per una sola disciplina.',
+  },
   { k: 'nome', label: 'Nome squadra', required: true },
   { k: 'emoji', label: 'Emoji', def: '🛡️' },
   { k: 'colore', label: 'Colore', type: 'color', def: '#1657c8' },
   {
     k: 'atletaIds', label: 'Componenti', type: 'select',
     attrs: 'multiple size="9"',
-    options: atletiSorted().map(a => ({
-      v: a.id,
-      l: a.nome + ' — ' + (nazione(a.nazioneId)?.nome || 'senza nazione'),
-      group: zonaLabel(nazione(a.nazioneId)?.zona) === '—' ? 'Zona da assegnare' : zonaLabel(nazione(a.nazioneId)?.zona),
-    })),
-    hint: 'Selezione multipla: pesca liberamente da nazioni e zone diverse.',
+    options: (sportId && iscrittiDiSport(sportId).length ? iscrittiDiSport(sportId) : atletiSorted())
+      .map(a => ({
+        v: a.id,
+        l: a.nome + ' — ' + (nazione(a.nazioneId)?.nome || 'senza nazione'),
+        group: sportId && isIscritto(sportId, a.id) ? 'Iscritti alla disciplina' : 'Altri atleti',
+      })),
+    hint: 'Selezione multipla. Compaiono prima gli iscritti alla disciplina.',
   },
   { k: 'note', label: 'Note', type: 'textarea', rows: 2 },
 ];
@@ -61,34 +73,32 @@ const squadraFields = () => [
 const sportFields = () => [
   { k: 'nome', label: 'Nome disciplina', required: true },
   { k: 'icona', label: 'Emoji disciplina', def: '🏅' },
-  { k: 'categoria', label: 'Categoria', hint: 'Es. Acqua, Terra, Tavolo' },
+  { k: 'categoria', label: 'Categoria', hint: 'Es. Acqua, Tavolo, Campo' },
   {
     k: 'tipo', label: 'Chi gareggia', type: 'select', def: 'individuale',
     options: [
       { v: 'individuale', l: 'Atleti singoli' },
-      { v: 'coppia', l: 'Coppie' },
-      { v: 'squadra', l: 'Squadre miste' },
+      { v: 'coppia', l: 'Coppie (squadre da 2)' },
+      { v: 'squadra', l: 'Squadre' },
       { v: 'nazione', l: 'Nazioni' },
     ],
+    hint: 'Determina da dove pescare i partecipanti quando generi il calendario.',
   },
   {
-    k: 'formato', label: 'Formato calendario', type: 'select', def: 'open',
+    k: 'formato', label: 'Formato', type: 'select', def: 'classifica',
     options: FORMATI.map(f => ({ v: f.v, l: f.l })),
-    hint: 'Decide come viene mostrato il calendario della disciplina.',
+    hint: FORMATI.map(f => f.l + ': ' + f.desc).join(' · '),
   },
   {
     k: 'stato', label: 'Stato', type: 'select', def: 'programmato',
-    options: [
-      { v: 'programmato', l: 'Programmato' },
-      { v: 'in corso', l: 'In corso' },
-      { v: 'completato', l: 'Completato' },
-    ],
+    options: STATI_SPORT.map(s => ({ v: s.v, l: s.l })),
+    hint: 'Annullato: la disciplina salta, esce dal calendario e non assegna medaglie.',
   },
   { k: 'data', label: 'Data e ora di inizio', type: 'datetime-local' },
   { k: 'luogo', label: 'Luogo' },
   { k: 'descrizione', label: 'Descrizione', type: 'textarea', rows: 4 },
   { k: 'regolamento', label: 'Regolamento', type: 'textarea', rows: 7, hint: 'Una regola per riga: diventa un elenco' },
-  { k: 'punti', label: 'Punti personalizzati', hint: 'Opzionale, es. 20,14,10,6,4,2 — sovrascrive lo schema globale' },
+  { k: 'punti', label: 'Punti personalizzati', hint: 'Solo se attivi i punti per piazzamento. Es. 20,14,10,6' },
   { k: 'ordine', label: 'Ordine di visualizzazione', type: 'number' },
 ];
 
@@ -96,25 +106,26 @@ const incontroFields = (sportId) => [
   {
     k: 'sportId', label: 'Disciplina', type: 'select', required: true, def: sportId || '',
     options: [{ v: '', l: '— seleziona —' }, ...sportSorted().map(s => ({
-      v: s.id, l: (s.icona || '') + ' ' + s.nome + ' · ' + formatoLabel(s.formato),
+      v: s.id, l: (s.icona || '') + ' ' + s.nome + ' · ' + formatoLabel(s),
     }))],
   },
-  { k: 'fase', label: 'Fase / turno', hint: 'Es. Girone unico, Quarti, Semifinale, Finale' },
-  { k: 'round', label: 'Numero turno', type: 'number', hint: 'Ordina le fasi nel tabellone (1, 2, 3…)' },
+  { k: 'fase', label: 'Fase / turno', hint: 'Es. Giornata 1, Quarti, Semifinale, Finale' },
+  { k: 'round', label: 'Numero turno', type: 'number', hint: 'Nel tabellone determina l\'avanzamento del vincitore' },
   { k: 'ordine', label: 'Ordine nel turno', type: 'number' },
   { k: 'data', label: 'Data e ora', type: 'datetime-local' },
   { k: 'luogo', label: 'Luogo' },
   {
     k: 'stato', label: 'Stato', type: 'select', def: 'programmato',
     options: STATI_INCONTRO.map(s => ({ v: s.v, l: s.l })),
+    hint: 'Appena metti "concluso" il vincitore avanza nel tabellone.',
   },
-  { k: 'latoA', label: 'Lato A', type: 'select', options: refOptions() },
+  { k: 'latoA', label: 'Lato A', type: 'select', options: refOptionsSport(sportId) },
   { k: 'punteggioA', label: 'Punteggio A' },
-  { k: 'latoB', label: 'Lato B', type: 'select', options: refOptions() },
+  { k: 'latoB', label: 'Lato B', type: 'select', options: refOptionsSport(sportId) },
   { k: 'punteggioB', label: 'Punteggio B' },
   {
-    k: 'vincitore', label: 'Vincitore (se non deducibile dal punteggio)', type: 'select',
-    options: refOptions({ vuoto: '— dal punteggio —' }),
+    k: 'vincitore', label: 'Vincitore', type: 'select',
+    options: refOptionsSport(sportId, { vuoto: '— dedotto dal punteggio —' }),
   },
   { k: 'note', label: 'Note', type: 'textarea', rows: 2 },
 ];
@@ -124,22 +135,22 @@ const risultatoFields = (sportId) => [
     k: 'sportId', label: 'Disciplina', type: 'select', required: true, def: sportId || '',
     options: [{ v: '', l: '— seleziona —' }, ...sportSorted().map(s => ({ v: s.id, l: (s.icona || '') + ' ' + s.nome }))],
   },
-  { k: 'posizione', label: 'Posizione finale', type: 'number', required: true, attrs: 'min="1" max="99"' },
+  { k: 'posizione', label: 'Posizione in classifica', type: 'number', required: true, attrs: 'min="1" max="99"' },
   {
-    k: 'squadraId', label: 'Squadra mista', type: 'select',
-    options: [{ v: '', l: '— nessuna —' }, ...squadreSorted().map(s => ({ v: s.id, l: (s.emoji || '🛡️') + ' ' + s.nome }))],
-    hint: 'Se compilata, i punti vanno alla squadra e non alla nazione.',
+    k: 'squadraId', label: 'Squadra', type: 'select',
+    options: [{ v: '', l: '— nessuna —' }, ...squadreSorted().map(s => ({
+      v: s.id, l: (s.emoji || '🛡️') + ' ' + s.nome + (getSport(s.sportId) ? ' · ' + getSport(s.sportId).nome : ''),
+    }))],
+    hint: 'Se compilata, la medaglia va alla squadra e non alla nazione.',
   },
   {
     k: 'nazioneId', label: 'Nazione', type: 'select',
     options: [{ v: '', l: '— nessuna —' }, ...nazioniSorted().map(n => ({ v: n.id, l: (n.emoji || '🚩') + ' ' + n.nome }))],
-    hint: 'Per gare individuali o di nazione. Indica almeno una fra squadra e nazione.',
   },
   {
     k: 'atletaIds', label: 'Atleti coinvolti', type: 'select',
     attrs: 'multiple size="7"',
     options: atletiSorted().map(a => ({ v: a.id, l: a.nome + ' — ' + (nazione(a.nazioneId)?.nome || '?') })),
-    hint: 'Ricevono i punti nella classifica individuale. Se lasci vuoto e scegli una squadra, valgono tutti i suoi componenti.',
   },
   { k: 'punteggio', label: 'Misura / punteggio', hint: 'Es. 12,4s — 3-1 — 45 punti' },
   { k: 'note', label: 'Note', type: 'textarea', rows: 2 },
@@ -149,9 +160,10 @@ const risultatoFields = (sportId) => [
 
 async function save(action, payload, okMsg) {
   try {
-    await mutate(action, payload);
+    const out = await mutate(action, payload);
     toast(okMsg || 'Salvato', 'ok');
     await store.refresh({ silent: true });
+    return out || true;
   } catch (err) {
     toast(err.message, 'err');
     return false;
@@ -165,7 +177,6 @@ function multiValues(form, name) {
   return [...el.selectedOptions].map(o => o.value).join(',');
 }
 
-/** Preseleziona le voci di una select multipla dopo l'apertura della modale. */
 function preselect(name, ids) {
   const sel = document.querySelector(`[name="${name}"]`);
   if (!sel || !sel.multiple) return;
@@ -181,7 +192,7 @@ function editRow(kind, fields, action, values, title) {
       const v = formValues(form);
       if (kind === 'risultato' || kind === 'squadra') v.atletaIds = multiValues(form, 'atletaIds');
       if (kind === 'risultato' && !v.squadraId && !v.nazioneId) {
-        toast('Indica la squadra oppure la nazione che riceve i punti', 'err');
+        toast('Indica la squadra oppure la nazione', 'err');
         return false;
       }
       if (kind === 'incontro' && v.latoA && v.latoA === v.latoB) {
@@ -209,9 +220,9 @@ export const admin = {
     if (!auth.isAdmin) return loginScreen();
 
     const tabs = [
-      ['nazioni', '🚩 Nazioni'], ['atleti', '🏃 Atleti'], ['squadre', '🛡️ Squadre'],
-      ['sport', '🥇 Sport'], ['calendario', '🗓️ Calendario'],
-      ['risultati', '🏆 Risultati'], ['config', '⚙️ Impostazioni'],
+      ['sport', '🥇 Sport'], ['iscritti', '👥 Iscritti'], ['squadre', '🛡️ Squadre'],
+      ['calendario', '🗓️ Calendario'], ['classifiche', '🏆 Classifiche'],
+      ['nazioni', '🚩 Nazioni'], ['atleti', '🏃 Atleti'], ['config', '⚙️ Impostazioni'],
     ];
     return `
     <div class="section-head">
@@ -277,8 +288,7 @@ export const admin = {
     document.querySelectorAll('[data-atab]').forEach(b => b.addEventListener('click', () => {
       tab = b.dataset.atab;
       document.querySelectorAll('[data-atab]').forEach(x => x.classList.toggle('on', x === b));
-      document.getElementById('adminPane').innerHTML = pane();
-      bindPane();
+      redrawPane();
     }));
 
     bindPane();
@@ -289,11 +299,18 @@ function rerender() {
   window.dispatchEvent(new CustomEvent('oee:rerender'));
 }
 
+function redrawPane() {
+  const p = document.getElementById('adminPane');
+  if (!p) return;
+  p.innerHTML = pane();
+  bindPane();
+}
+
 function setupScreen() {
   return `
   <h1>Configurazione iniziale</h1>
-  <div class="alert info">L'app non è ancora collegata al foglio Google. Segui il <b>README</b>,
-  poi incolla qui l'URL del Web App di Apps Script (finisce con <code>/exec</code>).</div>
+  <div class="alert info">L'app non è collegata al foglio Google. Incolla l'URL del Web App
+  di Apps Script (finisce con <code>/exec</code>).</div>
   <form class="card" id="setupForm">
     ${renderFields([{ k: 'url', label: 'URL Web App', required: true, hint: 'https://script.google.com/macros/s/…/exec' }])}
     <div id="diagOut"></div>
@@ -309,7 +326,7 @@ function showDiag(res, where = 'diagOut') {
 function loginScreen() {
   return `
   <h1>Area riservata</h1>
-  <p class="muted">Inserisci il PIN admin per gestire nazioni, squadre, discipline, calendario e risultati.</p>
+  <p class="muted">Inserisci il PIN admin per gestire discipline, iscritti, squadre, calendari e classifiche.</p>
   <form class="card" id="adminLogin">
     ${renderFields([{ k: 'pin', label: 'PIN admin', type: 'password', required: true, attrs: 'autocomplete="current-password"' }])}
     <label class="fld" style="display:flex;gap:.5rem;align-items:center">
@@ -318,7 +335,7 @@ function loginScreen() {
     </label>
     <button class="btn block" type="submit">Entra</button>
   </form>
-  <p class="small muted">Il PIN è verificato dal server (Apps Script) e non è contenuto nell'app.</p>
+  <p class="small muted">Il PIN è verificato dal server e non è contenuto nell'app.</p>
   <div class="card">
     <h3>Problemi di collegamento?</h3>
     <p class="small muted" style="word-break:break-all">${esc(CONFIG.apiUrl)}</p>
@@ -331,13 +348,16 @@ function loginScreen() {
 }
 
 function pane() {
-  if (tab === 'nazioni') return paneNazioni();
-  if (tab === 'atleti') return paneAtleti();
-  if (tab === 'squadre') return paneSquadre();
-  if (tab === 'sport') return paneSport();
-  if (tab === 'calendario') return paneCalendario();
-  if (tab === 'risultati') return paneRisultati();
-  return paneConfig();
+  switch (tab) {
+    case 'sport': return paneSport();
+    case 'iscritti': return paneIscritti();
+    case 'squadre': return paneSquadre();
+    case 'calendario': return paneCalendario();
+    case 'classifiche': return paneClassifiche();
+    case 'nazioni': return paneNazioni();
+    case 'atleti': return paneAtleti();
+    default: return paneConfig();
+  }
 }
 
 function actions(kind, id) {
@@ -346,6 +366,261 @@ function actions(kind, id) {
     <button class="btn danger sm" data-del="${kind}" data-id="${esc(id)}">✕</button>
   </div>`;
 }
+
+/** Selettore di disciplina condiviso dalle schede che lavorano su un solo sport. */
+function sportPicker(id, selected) {
+  return `<select id="${id}" aria-label="Disciplina">
+    ${sportSorted().map(s => `<option value="${esc(s.id)}" ${String(s.id) === String(selected) ? 'selected' : ''}>
+      ${esc((s.icona || '') + ' ' + s.nome)}${isAnnullato(s) ? ' (annullato)' : ''}</option>`).join('')}
+  </select>`;
+}
+
+function scegliSport(corrente, setter) {
+  const list = sportSorted();
+  if (!list.length) return null;
+  if (!corrente || !getSport(corrente)) setter(list[0].id);
+  return getSport(corrente) || list[0];
+}
+
+/* ---------- sport ---------- */
+
+function paneSport() {
+  const list = sportSorted();
+  return `
+  <div class="btn-row" style="margin-bottom:.8rem">
+    <button class="btn" data-new="sport">+ Nuova disciplina</button>
+  </div>
+  ${list.length ? `<div class="list">${list.map(s => `
+    <div class="row-item ${isAnnullato(s) ? 'annullato' : ''}">
+      <span style="font-size:1.5rem">${esc(s.icona || '🏅')}</span>
+      <span class="grow"><b>${esc(s.nome)}</b>
+        <span class="small muted">${statoPill(s.stato)} ${esc(formatoLabel(s))} ·
+        ${iscrittiDiSport(s.id).length} iscritti · ${incontriDiSport(s.id).length} incontri ·
+        ${risultatiDiSport(s.id).length} in classifica${s.data ? ' · ' + esc(fmtDate(s.data)) : ''}</span></span>
+      ${actions('sport', s.id)}
+    </div>`).join('')}</div>` : '<div class="empty">Nessuna disciplina.</div>'}`;
+}
+
+/* ---------- iscritti ---------- */
+
+function paneIscritti() {
+  const s = scegliSport(iscSportId, v => { iscSportId = v; });
+  if (!s) return '<div class="empty">Crea prima una disciplina.</div>';
+  const tutti = atletiSorted();
+  if (!tutti.length) return '<div class="empty">Crea prima gli atleti.</div>';
+  const iscritti = iscrittiDiSport(s.id);
+
+  return `
+  <div class="filters">
+    ${sportPicker('iscSport', s.id)}
+    <input id="qIsc" type="search" placeholder="Cerca atleta…" aria-label="Cerca atleta">
+  </div>
+  <div class="alert info">Spunta chi partecipa a <b>${esc(s.nome)}</b>.
+  Da qui nascono le squadre e i calendari della disciplina.</div>
+  <form id="iscForm">
+    <div class="btn-row" style="margin-bottom:.7rem">
+      <button class="btn" type="submit">Salva iscritti</button>
+      <button class="btn ghost sm" type="button" data-sel="tutti">Tutti</button>
+      <button class="btn ghost sm" type="button" data-sel="nessuno">Nessuno</button>
+      <span class="small muted" id="iscCount">${iscritti.length} selezionati</span>
+    </div>
+    <div class="checklist" id="iscList">
+      ${tutti.map(a => `
+        <label class="check" data-nome="${esc(slug(a.nome + ' ' + (nazione(a.nazioneId)?.nome || '')))}">
+          <input type="checkbox" name="atleti" value="${esc(a.id)}" ${isIscritto(s.id, a.id) ? 'checked' : ''}>
+          <span class="grow"><b>${esc(a.nome)}</b>
+            <span class="small muted">${esc(nazione(a.nazioneId)?.nome || 'senza nazione')}</span></span>
+        </label>`).join('')}
+    </div>
+  </form>`;
+}
+
+/* ---------- squadre ---------- */
+
+function paneSquadre() {
+  const s = scegliSport(sqdSportId, v => { sqdSportId = v; });
+  if (!s) return '<div class="empty">Crea prima una disciplina.</div>';
+  const iscritti = iscrittiDiSport(s.id);
+  const list = squadreDiSport(s.id);
+  const orfane = squadreSorted().filter(x => !x.sportId);
+
+  return `
+  <div class="filters">
+    ${sportPicker('sqdSport', s.id)}
+  </div>
+  <div class="alert info">Le squadre di <b>${esc(s.nome)}</b> si compongono dai suoi
+  ${iscritti.length} iscritti. Restano miste: i componenti possono venire da nazioni e zone diverse.</div>
+  <div class="btn-row" style="margin-bottom:.8rem">
+    <button class="btn gold" data-gen="squadre" ${iscritti.length >= 2 ? '' : 'disabled'}>⚡ Genera squadre</button>
+    <button class="btn" data-new="squadra">+ A mano</button>
+    ${iscritti.length >= 2 ? '' : '<span class="small muted">Registra prima gli iscritti</span>'}
+  </div>
+  ${list.length ? `<div class="list">${list.map(q => {
+    const rosa = atletiDiSquadra(q.id);
+    return `<div class="row-item">
+      <span style="font-size:1.5rem">${esc(q.emoji || '🛡️')}</span>
+      <span class="grow"><b>${esc(q.nome)}</b>
+        <span class="small muted">${esc(rosa.map(a => a.nome).join(', ') || 'rosa vuota')}</span></span>
+      ${actions('squadra', q.id)}
+    </div>`;
+  }).join('')}</div>` : '<div class="empty">Nessuna squadra per questa disciplina.</div>'}
+  ${orfane.length ? `
+    <div class="section-head" style="margin-top:1.2rem"><h3 style="margin:0">Senza disciplina</h3></div>
+    <div class="list">${orfane.map(q => `
+      <div class="row-item">
+        <span style="font-size:1.5rem">${esc(q.emoji || '🛡️')}</span>
+        <span class="grow"><b>${esc(q.nome)}</b>
+          <span class="small muted">assegnale una disciplina</span></span>
+        ${actions('squadra', q.id)}
+      </div>`).join('')}</div>` : ''}`;
+}
+
+/* ---------- calendario ---------- */
+
+function paneCalendario() {
+  const s = scegliSport(calSportId, v => { calSportId = v; });
+  if (!s) return '<div class="empty">Crea prima una disciplina.</div>';
+  const formato = formatoDi(s);
+  const meta = formatoMeta(formato);
+  const inc = incontriDiSport(s.id);
+  const parts = partecipantiDiSport(s.id);
+
+  return `
+  <div class="filters">
+    ${sportPicker('calSport', s.id)}
+  </div>
+  <div class="alert info"><b>${esc(meta.l)}.</b> ${esc(meta.desc)}
+  Il formato si cambia dalla scheda Sport.</div>
+  <div class="alert ${parts.length >= 2 ? 'info' : 'warn'}">
+    Partecipanti rilevati: <b>${parts.length}</b>
+    (${esc(s.tipo === 'squadra' || s.tipo === 'coppia' ? 'squadre della disciplina'
+      : s.tipo === 'nazione' ? 'nazioni' : 'iscritti alla disciplina')}).
+    ${parts.length >= 2 ? previsione(formato, parts.length) : 'Servono almeno 2 partecipanti.'}
+  </div>
+  <div class="btn-row" style="margin-bottom:.8rem">
+    <button class="btn gold" data-gen="calendario" ${meta.genera && parts.length >= 2 ? '' : 'disabled'}>⚡ Genera calendario</button>
+    <button class="btn" data-new="incontro">+ Incontro a mano</button>
+    ${inc.length ? '<button class="btn danger sm" data-gen="svuota">Svuota calendario</button>' : ''}
+  </div>
+  ${inc.length ? `<div class="list">${inc.map(i => {
+    const a = refEntity(i.latoA); const b = refEntity(i.latoB);
+    const testa = (a || b)
+      ? `${a ? esc(a.emoji + ' ' + a.nome) : '<i class="muted">da definire</i>'} <span class="vs">vs</span> ${b ? esc(b.emoji + ' ' + b.nome) : '<i class="muted">da definire</i>'}`
+      : '<i class="muted">avversari da definire</i>';
+    const score = (i.punteggioA || i.punteggioB) ? ` · ${esc(i.punteggioA || '—')}-${esc(i.punteggioB || '—')}` : '';
+    return `<div class="row-item">
+      <span class="grow"><b>${testa}</b>
+        <span class="small muted">${esc(i.fase || 'Fase da definire')}${i.data ? ' · ' + esc(fmtDate(i.data)) : ''}${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}${score}</span></span>
+      ${statoPill(i.stato)}
+      ${actions('incontro', i.id)}
+    </div>`;
+  }).join('')}</div>` : `<div class="empty">${meta.genera
+    ? 'Nessun incontro: genera il calendario o aggiungine uno a mano.'
+    : 'Gara unica: non serve un calendario di incontri.'}</div>`}`;
+}
+
+function previsione(formato, n) {
+  if (formato === 'tutti') return `Verranno create ${n * (n - 1) / 2} partite in ${n % 2 ? n : n - 1} giornate.`;
+  if (formato === 'tabellone') {
+    let size = 2; while (size < n) size *= 2;
+    const turni = Math.round(Math.log2(size));
+    return `Tabellone da ${size} posti: ${turni} turni, ${n - 1} partite, ${size - n} passaggi automatici al primo turno.`;
+  }
+  if (formato === 'scontro') return `Verranno accoppiate ${Math.floor(n / 2)} sfide.`;
+  return 'Questo formato non prevede incontri.';
+}
+
+/* ---------- classifiche per disciplina ---------- */
+
+function paneClassifiche() {
+  const list = sportSorted();
+  if (!list.length) return '<div class="empty">Crea prima una disciplina.</div>';
+  return `
+  <div class="alert info">Per ogni disciplina si compila la <b>classifica completa</b>:
+  le medaglie vanno automaticamente ai primi tre.
+  ${puntiAttivi() ? 'I punti per piazzamento sono attivi.' : 'I punti per piazzamento sono disattivati.'}</div>
+  <div class="list">${list.map(s => {
+    const ris = risultatiDiSport(s.id);
+    return `<div class="row-item ${isAnnullato(s) ? 'annullato' : ''}">
+      <span style="font-size:1.4rem">${esc(s.icona || '🏅')}</span>
+      <span class="grow"><b>${esc(s.nome)}</b>
+        <span class="small muted">${ris.length ? ris.length + ' posizioni · 🥇 ' + esc(nomiRisultato(ris[0])) : 'classifica vuota'}</span></span>
+      <button class="btn sm" data-cls="${esc(s.id)}">${ris.length ? 'Modifica' : 'Compila'}</button>
+    </div>`;
+  }).join('')}</div>
+  <div class="section-head" style="margin-top:1.2rem"><h3 style="margin:0">Risultati singoli</h3>
+    <button class="btn ghost sm" data-new="risultato">+ Aggiungi</button></div>
+  ${list.map(s => {
+    const ris = risultatiDiSport(s.id);
+    if (!ris.length) return '';
+    return `<div class="card" style="margin-bottom:.7rem">
+      <h3>${esc(s.icona || '🏅')} ${esc(s.nome)}</h3>
+      <div class="list">${ris.map(r => `
+        <div class="row-item">
+          <span style="font-size:1.2rem">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</span>
+          <span class="grow"><b>${esc(nomiRisultato(r))}</b>
+            <span class="small muted">${esc(r.squadraId ? (squadra(r.squadraId)?.nome || '—') + ' (squadra)' : nazione(r.nazioneId)?.nome || '—')}${r.punteggio ? ' · ' + esc(r.punteggio) : ''}</span></span>
+          ${actions('risultato', r.id)}
+        </div>`).join('')}</div>
+    </div>`;
+  }).join('')}`;
+}
+
+/** Editor della classifica finale: ordina i partecipanti dal primo all'ultimo. */
+function apriClassifica(sportId) {
+  const s = getSport(sportId);
+  if (!s) return;
+  const ris = risultatiDiSport(sportId);
+  const attuali = ris.map(r => r.squadraId ? 'sqd:' + r.squadraId
+    : (idList(r.atletaIds)[0] ? 'atl:' + idList(r.atletaIds)[0] : 'naz:' + r.nazioneId));
+  const candidati = partecipantiDiSport(sportId);
+  const ordine = [...attuali, ...candidati.filter(c => !attuali.includes(c))]
+    .filter(ref => refEntity(ref));
+
+  if (!ordine.length) {
+    toast('Nessun partecipante: registra gli iscritti o crea le squadre', 'err');
+    return;
+  }
+
+  openModal({
+    title: 'Classifica di ' + s.nome,
+    okText: 'Salva classifica',
+    body: `
+      <p class="small muted">Trascina no: usa le frecce per ordinare. Il primo prende l'oro,
+      il secondo l'argento, il terzo il bronzo. Togli chi non ha gareggiato.</p>
+      <ol class="rank" id="rankList">
+        ${ordine.map(ref => {
+          const e = refEntity(ref);
+          return `<li data-ref="${esc(ref)}">
+            <span class="grow">${esc(e.emoji + ' ' + e.nome)}</span>
+            <button type="button" class="icon-btn sm" data-up title="Su">▲</button>
+            <button type="button" class="icon-btn sm" data-down title="Giù">▼</button>
+            <button type="button" class="icon-btn sm" data-out title="Togli">✕</button>
+          </li>`;
+        }).join('')}
+      </ol>`,
+    onOk: async () => {
+      const refs = [...document.querySelectorAll('#rankList li')].map(li => li.dataset.ref);
+      return await save('setClassificaSport', { sportId, ordine: refs.join(',') }, 'Classifica salvata');
+    },
+  });
+
+  const list = document.getElementById('rankList');
+  list?.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const li = btn.closest('li');
+    if (btn.hasAttribute('data-up') && li.previousElementSibling) {
+      li.parentNode.insertBefore(li, li.previousElementSibling);
+    } else if (btn.hasAttribute('data-down') && li.nextElementSibling) {
+      li.parentNode.insertBefore(li.nextElementSibling, li);
+    } else if (btn.hasAttribute('data-out')) {
+      li.remove();
+    }
+  });
+}
+
+/* ---------- nazioni e atleti ---------- */
 
 function paneNazioni() {
   const gruppi = [
@@ -367,7 +642,7 @@ function paneNazioni() {
           <span class="small muted">${esc(n.citta || '—')} · ${atletiDiNazione(n.id).length} atleti</span></span>
         ${actions('nazione', n.id)}
       </div>`).join('')}</div>`).join('')
-    : '<div class="empty">Nessuna nazione. Inizia da qui.</div>'}`;
+    : '<div class="empty">Nessuna nazione.</div>'}`;
 }
 
 function paneAtleti() {
@@ -385,100 +660,6 @@ function paneAtleti() {
     </div>`).join('')}</div>` : '<div class="empty">Nessun atleta.</div>'}`;
 }
 
-function paneSquadre() {
-  const list = squadreSorted();
-  return `
-  <div class="alert info">Le squadre sono <b>miste</b>: pesca i componenti da nazioni e zone diverse.
-  I loro punti finiscono nella classifica squadre e in quella individuale, non nel medagliere delle nazioni.</div>
-  <div class="btn-row" style="margin-bottom:.8rem">
-    <button class="btn" data-new="squadra" ${atletiSorted().length ? '' : 'disabled'}>+ Nuova squadra</button>
-    ${atletiSorted().length ? '' : '<span class="small muted">Crea prima gli atleti</span>'}
-  </div>
-  ${list.length ? `<div class="list">${list.map(s => {
-    const rosa = atletiDiSquadra(s.id);
-    return `<div class="row-item">
-      <span style="font-size:1.5rem">${esc(s.emoji || '🛡️')}</span>
-      <span class="grow"><b>${esc(s.nome)}</b>
-        <span class="small muted">${rosa.length} component${rosa.length === 1 ? 'e' : 'i'}: ${esc(rosa.map(a => a.nome).join(', ') || 'nessuno')}</span></span>
-      ${actions('squadra', s.id)}
-    </div>`;
-  }).join('')}</div>` : '<div class="empty">Nessuna squadra.</div>'}`;
-}
-
-function paneSport() {
-  const list = sportSorted();
-  return `
-  <div class="btn-row" style="margin-bottom:.8rem">
-    <button class="btn" data-new="sport">+ Nuova disciplina</button>
-  </div>
-  ${list.length ? `<div class="list">${list.map(s => `
-    <div class="row-item">
-      <span style="font-size:1.5rem">${esc(s.icona || '🏅')}</span>
-      <span class="grow"><b>${esc(s.nome)}</b>
-        <span class="small muted">${statoPill(s.stato)} ${esc(formatoLabel(s.formato))} · ${incontriDiSport(s.id).length} incontri · ${risultatiDiSport(s.id).length} risultati</span></span>
-      ${actions('sport', s.id)}
-    </div>`).join('')}</div>` : '<div class="empty">Nessuna disciplina.</div>'}`;
-}
-
-/* ---------- calendario per disciplina ---------- */
-
-function paneCalendario() {
-  const sports = sportSorted();
-  if (!sports.length) return '<div class="empty">Crea prima una disciplina.</div>';
-  if (!calSportId || !getSport(calSportId)) calSportId = sports[0].id;
-  const s = getSport(calSportId);
-  const inc = incontriDiSport(s.id);
-
-  return `
-  <div class="filters">
-    <select id="calSport" aria-label="Disciplina del calendario">
-      ${sports.map(x => `<option value="${esc(x.id)}" ${String(x.id) === String(calSportId) ? 'selected' : ''}>
-        ${esc((x.icona || '') + ' ' + x.nome)}</option>`).join('')}
-    </select>
-    <button class="btn" data-new="incontro">+ Nuovo incontro</button>
-  </div>
-  <div class="alert info"><b>${esc(formatoLabel(s.formato))}.</b>
-    ${esc(FORMATI.find(f => f.v === (s.formato || 'open'))?.desc || '')}
-    Cambi il formato dalla scheda Sport.</div>
-  ${inc.length ? `<div class="list">${inc.map(i => {
-    const a = refEntity(i.latoA), b = refEntity(i.latoB);
-    const testa = a || b
-      ? `${a ? esc(a.emoji + ' ' + a.nome) : 'da definire'} <span class="vs">vs</span> ${b ? esc(b.emoji + ' ' + b.nome) : 'da definire'}`
-      : '<i class="muted">turno senza avversari definiti</i>';
-    const score = (i.punteggioA || i.punteggioB) ? ` · ${esc(i.punteggioA || '—')}-${esc(i.punteggioB || '—')}` : '';
-    return `<div class="row-item">
-      <span class="grow"><b>${testa}</b>
-        <span class="small muted">${esc(i.fase || 'Fase da definire')}${i.round ? ' · turno ' + esc(i.round) : ''}${i.data ? ' · ' + esc(fmtDate(i.data)) : ''}${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}${score}</span></span>
-      ${statoPill(i.stato)}
-      ${actions('incontro', i.id)}
-    </div>`;
-  }).join('')}</div>` : '<div class="empty">Nessun incontro per questa disciplina.</div>'}`;
-}
-
-function paneRisultati() {
-  const sports = sportSorted();
-  const pronti = sports.length && (nazioniSorted().length || squadreSorted().length);
-  return `
-  <div class="btn-row" style="margin-bottom:.8rem">
-    <button class="btn gold" data-new="risultato" ${pronti ? '' : 'disabled'}>+ Nuovo risultato</button>
-    ${pronti ? '' : '<span class="small muted">Servono una disciplina e almeno una nazione o squadra</span>'}
-  </div>
-  ${sports.map(s => {
-    const ris = risultatiDiSport(s.id);
-    if (!ris.length) return '';
-    return `<div class="card" style="margin-bottom:.7rem">
-      <h3>${esc(s.icona || '🏅')} ${esc(s.nome)}</h3>
-      <div class="list">${ris.map(r => `
-        <div class="row-item">
-          <span style="font-size:1.2rem">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</span>
-          <span class="grow"><b>${esc(nomiRisultato(r))}</b>
-            <span class="small muted">${esc(r.squadraId ? (squadra(r.squadraId)?.nome || '—') + ' (squadra)' : nazione(r.nazioneId)?.nome || '—')}${r.punteggio ? ' · ' + esc(r.punteggio) : ''}</span></span>
-          ${actions('risultato', r.id)}
-        </div>`).join('')}</div>
-    </div>`;
-  }).join('') || '<div class="empty">Nessun risultato registrato.</div>'}`;
-}
-
 function paneConfig() {
   const c = store.data.config || {};
   return `
@@ -487,9 +668,14 @@ function paneConfig() {
       { k: 'nome', label: 'Nome evento', def: CONFIG.EVENT_NAME },
       { k: 'edizione', label: 'Edizione', def: CONFIG.EDITION },
       { k: 'descrizione', label: 'Descrizione in homepage', type: 'textarea', rows: 3 },
-      { k: 'punti', label: 'Punti per posizione', hint: 'Separati da virgola: 1°,2°,3°… Attuale: ' + puntiSchema(null).join(' / '), def: CONFIG.POINTS.join(',') },
-      { k: 'puntiVittoria', label: 'Punti per vittoria (gironi)', type: 'number', def: '3' },
-      { k: 'puntiPareggio', label: 'Punti per pareggio (gironi)', type: 'number', def: '1' },
+      {
+        k: 'puntiAttivi', label: 'Punti per piazzamento', type: 'select', def: 'no',
+        options: [{ v: 'no', l: 'No: solo medaglie ai primi tre' }, { v: 'si', l: 'Sì: assegna punti per posizione' }],
+        hint: 'Con "no" le classifiche si ordinano a medaglie, come il medagliere olimpico.',
+      },
+      { k: 'punti', label: 'Punti per posizione', hint: 'Usati solo se attivi i punti. Attuale: ' + puntiSchema(null).join(' / '), def: CONFIG.POINTS.join(',') },
+      { k: 'puntiVittoria', label: 'Punti per vittoria (gruppi)', type: 'number', def: '3' },
+      { k: 'puntiPareggio', label: 'Punti per pareggio (gruppi)', type: 'number', def: '1' },
     ], c)}
     <button class="btn block" type="submit">Salva impostazioni</button>
   </form>
@@ -509,23 +695,139 @@ function paneConfig() {
   </div>`;
 }
 
+/* ---------- generatori ---------- */
+
+function apriGeneraSquadre(sportId) {
+  const s = getSport(sportId);
+  const n = iscrittiDiSport(sportId).length;
+  openModal({
+    title: 'Genera squadre · ' + s.nome,
+    okText: 'Genera',
+    body: `<div class="alert warn">Le squadre esistenti di questa disciplina, e i loro risultati,
+      verranno sostituite.</div>` +
+      renderFields([
+        { k: 'dimensione', label: 'Componenti per squadra', type: 'number', def: s.tipo === 'coppia' ? '2' : '3', attrs: 'min="2" max="12"', hint: n + ' iscritti disponibili' },
+        { k: 'prefisso', label: 'Nome base', def: s.tipo === 'coppia' ? 'Coppia' : 'Squadra' },
+        {
+          k: 'mescola', label: 'Composizione', type: 'select', def: 'true',
+          options: [{ v: 'true', l: 'Sorteggio casuale' }, { v: 'false', l: 'Ordine di iscrizione' }],
+        },
+      ]),
+    onOk: async form => {
+      const v = formValues(form);
+      const out = await save('generaSquadre', { sportId, ...v }, 'Squadre create');
+      if (out && out.nota) toast(out.nota, 'ok');
+      if (out) redrawPane();
+      return out !== false;
+    },
+  });
+}
+
+function apriGeneraCalendario(sportId) {
+  const s = getSport(sportId);
+  const formato = formatoDi(s);
+  const parts = partecipantiDiSport(sportId);
+  openModal({
+    title: 'Genera calendario · ' + s.nome,
+    okText: 'Genera',
+    body: `<div class="alert warn">Gli incontri già presenti in questa disciplina verranno sostituiti.</div>
+      <p class="small muted">${esc(previsione(formato, parts.length))}</p>` +
+      renderFields([
+        {
+          k: 'fonte', label: 'Partecipanti', type: 'select',
+          def: s.tipo === 'squadra' || s.tipo === 'coppia' ? 'squadre' : (s.tipo === 'nazione' ? 'nazioni' : 'iscritti'),
+          options: [
+            { v: 'iscritti', l: 'Iscritti alla disciplina (' + iscrittiDiSport(sportId).length + ')' },
+            { v: 'squadre', l: 'Squadre della disciplina (' + squadreDiSport(sportId).length + ')' },
+            { v: 'nazioni', l: 'Tutte le nazioni (' + nazioniSorted().length + ')' },
+          ],
+        },
+        {
+          k: 'mescola', label: 'Ordine', type: 'select', def: 'true',
+          options: [{ v: 'true', l: 'Sorteggio casuale' }, { v: 'false', l: 'Ordine di iscrizione (testa di serie)' }],
+        },
+        { k: 'dataInizio', label: 'Prima partita', type: 'datetime-local', def: s.data || '' },
+        { k: 'intervallo', label: 'Minuti tra una partita e l\'altra', type: 'number', def: '20', attrs: 'min="0" max="600"', hint: '0 per non assegnare orari' },
+        { k: 'luogo', label: 'Luogo', def: s.luogo || '' },
+      ]),
+    onOk: async form => {
+      const out = await save('generaCalendario', { sportId, ...formValues(form) }, 'Calendario generato');
+      if (out && out.partite) toast(out.partite + ' partite create', 'ok');
+      if (out) redrawPane();
+      return out !== false;
+    },
+  });
+}
+
+/* ---------- binding ---------- */
+
 function bindPane() {
   const pane = document.getElementById('adminPane');
   if (!pane) return;
 
-  document.getElementById('calSport')?.addEventListener('change', e => {
-    calSportId = e.target.value;
-    pane.innerHTML = paneCalendario();
-    bindPane();
+  // selettori di disciplina
+  const picker = (id, setter) => document.getElementById(id)?.addEventListener('change', e => {
+    setter(e.target.value);
+    redrawPane();
   });
+  picker('calSport', v => { calSportId = v; });
+  picker('iscSport', v => { iscSportId = v; });
+  picker('sqdSport', v => { sqdSportId = v; });
+
+  // iscrizioni
+  const iscForm = document.getElementById('iscForm');
+  if (iscForm) {
+    const boxes = () => [...iscForm.querySelectorAll('input[name="atleti"]')];
+    const conta = () => {
+      const el = document.getElementById('iscCount');
+      if (el) el.textContent = boxes().filter(b => b.checked).length + ' selezionati';
+    };
+    iscForm.addEventListener('change', conta);
+    iscForm.querySelectorAll('[data-sel]').forEach(b => b.addEventListener('click', () => {
+      const on = b.dataset.sel === 'tutti';
+      boxes().forEach(x => { if (!x.closest('.check').classList.contains('hide')) x.checked = on; });
+      conta();
+    }));
+    document.getElementById('qIsc')?.addEventListener('input', e => {
+      const term = slug(e.target.value);
+      iscForm.querySelectorAll('.check').forEach(l =>
+        l.classList.toggle('hide', !!term && !l.dataset.nome.includes(term)));
+    });
+    iscForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const ids = boxes().filter(b => b.checked).map(b => b.value);
+      const out = await save('setIscrizioni', { sportId: iscSportId, atletaIds: ids.join(',') },
+        ids.length + ' iscritti salvati');
+      if (out) redrawPane();
+    });
+  }
+
+  // generatori
+  pane.querySelectorAll('[data-gen]').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.gen === 'squadre') return apriGeneraSquadre(sqdSportId);
+    if (b.dataset.gen === 'calendario') return apriGeneraCalendario(calSportId);
+    if (b.dataset.gen === 'svuota') {
+      return confirmModal('Svuotare il calendario?',
+        'Tutti gli incontri di questa disciplina verranno eliminati.', async () => {
+          const out = await save('svuotaCalendario', { sportId: calSportId }, 'Calendario svuotato');
+          if (out) redrawPane();
+        }, 'Svuota');
+    }
+  }));
+
+  // classifica per disciplina
+  pane.querySelectorAll('[data-cls]').forEach(b =>
+    b.addEventListener('click', () => apriClassifica(b.dataset.cls)));
 
   pane.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
     switch (b.dataset.new) {
       case 'nazione': return editRow('nazione', nazioneFields(), 'upsertNazione', {}, 'Nuova nazione');
       case 'atleta': return editRow('atleta', atletaFields(), 'upsertAtleta', {}, 'Nuovo atleta');
-      case 'squadra': return editRow('squadra', squadraFields(), 'upsertSquadra', {}, 'Nuova squadra mista');
+      case 'squadra': return editRow('squadra', squadraFields(sqdSportId), 'upsertSquadra',
+        { sportId: sqdSportId }, 'Nuova squadra');
       case 'sport': return editRow('sport', sportFields(), 'upsertSport', {}, 'Nuova disciplina');
-      case 'incontro': return editRow('incontro', incontroFields(calSportId), 'upsertIncontro', {}, 'Nuovo incontro');
+      case 'incontro': return editRow('incontro', incontroFields(calSportId), 'upsertIncontro',
+        { sportId: calSportId }, 'Nuovo incontro');
       case 'risultato': return editRow('risultato', risultatoFields(), 'upsertRisultato', {}, 'Nuovo risultato');
     }
   }));
@@ -535,7 +837,10 @@ function bindPane() {
     switch (edit) {
       case 'nazione': return editRow('nazione', nazioneFields(), 'upsertNazione', nazione(id), 'Modifica nazione');
       case 'atleta': return editRow('atleta', atletaFields(), 'upsertAtleta', atleta(id), 'Modifica atleta');
-      case 'squadra': return editRow('squadra', squadraFields(), 'upsertSquadra', squadra(id), 'Modifica squadra');
+      case 'squadra': {
+        const q = squadra(id);
+        return editRow('squadra', squadraFields(q?.sportId || sqdSportId), 'upsertSquadra', q, 'Modifica squadra');
+      }
       case 'sport': return editRow('sport', sportFields(), 'upsertSport', getSport(id), 'Modifica disciplina');
       case 'incontro': {
         const i = incontro(id);

@@ -115,7 +115,9 @@ label.fld{display:block;margin-bottom:.75rem}
 label.fld > span{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:.25rem;text-transform:uppercase;letter-spacing:.5px}
 input,select,textarea{
   width:100%;padding:.6rem .7rem;border:1px solid var(--line);border-radius:10px;
-  font:inherit;font-size:.92rem;background:#fff;color:var(--txt)
+  font:inherit;background:#fff;color:var(--txt);
+  /* 16px esatti: sotto questa soglia iOS Safari zooma al focus */
+  font-size:16px
 }
 input:focus,select:focus,textarea:focus{outline:2px solid var(--blu-2);outline-offset:1px;border-color:var(--blu-2)}
 textarea{min-height:110px;resize:vertical;line-height:1.5}
@@ -146,8 +148,9 @@ tr.podio-3{background:linear-gradient(90deg,rgba(190,120,60,.14),transparent)}
 .pill.incorso{background:#fff2d6;color:#8a5a06}
 .pill.completato{background:#e0f6ea;color:#146c41}
 
-.filters{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.9rem}
-.filters input,.filters select{max-width:230px}
+.filters{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.9rem}
+.filters input,.filters select{max-width:230px;flex:1 1 160px}
+.filters .btn{flex:0 0 auto}
 
 .list{display:flex;flex-direction:column;gap:.5rem}
 .row-item{
@@ -283,3 +286,63 @@ tr.podio-3{background:linear-gradient(90deg,rgba(190,120,60,.14),transparent)}
 .vs-mini{display:flex;align-items:center;gap:.2rem;flex-wrap:wrap;justify-content:flex-end}
 .chip.tbd{background:#f1f4fa;color:var(--muted);font-weight:500;font-style:italic}
 .chips-inline{display:flex;gap:.25rem;flex-wrap:wrap;justify-content:flex-end;max-width:52%}
+
+/* ---------- stato annullato ---------- */
+.pill.annullato{background:#f1f3f7;color:#7c8698;text-decoration:line-through}
+.sport-card.annullato,.row-item.annullato{opacity:.62}
+.sport-card.annullato h3,.row-item.annullato > .grow > b{text-decoration:line-through}
+
+/* ---------- calendario per giorni ---------- */
+.giorno{margin-bottom:1.2rem}
+.giorno-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;
+  margin:0 0 .5rem;padding-bottom:.3rem;border-bottom:2px solid var(--line)
+}
+.giorno-head h2{margin:0;font-size:1.05rem;text-transform:capitalize}
+.giorno.oggi .giorno-head{border-bottom-color:var(--oro)}
+.giorno.oggi .giorno-head h2{color:var(--blu)}
+.slots{display:flex;flex-direction:column}
+.slot{
+  display:flex;align-items:center;gap:.7rem;padding:.6rem .1rem;
+  border-bottom:1px solid var(--line);color:var(--txt)
+}
+.slot:last-child{border-bottom:0}
+.slot .grow{flex:1;min-width:0}
+.slot .grow > b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .ora{
+  flex:0 0 3.1rem;font-variant-numeric:tabular-nums;color:var(--blu);
+  font-size:.95rem;letter-spacing:-.3px
+}
+.slot .sc{font-variant-numeric:tabular-nums;font-weight:800;color:var(--blu);white-space:nowrap}
+
+/* ---------- liste con spunta (iscritti) ---------- */
+.checklist{
+  display:grid;gap:.4rem;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+  max-height:60vh;overflow-y:auto;padding:.15rem
+}
+.check{
+  display:flex;align-items:center;gap:.6rem;background:#fff;border:1px solid var(--line);
+  border-radius:11px;padding:.55rem .7rem;cursor:pointer
+}
+.check:has(input:checked){border-color:var(--blu);background:#f2f7ff}
+.check input{width:20px;height:20px;flex:0 0 auto;accent-color:var(--blu)}
+.check .grow{min-width:0}
+.check .grow b{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- editor della classifica ---------- */
+.rank{list-style:none;margin:0;padding:0;counter-reset:pos}
+.rank li{
+  counter-increment:pos;display:flex;align-items:center;gap:.4rem;
+  border:1px solid var(--line);border-radius:11px;padding:.5rem .6rem;margin-bottom:.4rem;background:#fff
+}
+.rank li:before{
+  content:counter(pos);flex:0 0 1.7rem;height:1.7rem;border-radius:50%;
+  background:#eef3fc;color:var(--blu);font-weight:800;font-size:.8rem;
+  display:grid;place-items:center
+}
+.rank li:nth-child(1):before{background:var(--oro);color:#40260a}
+.rank li:nth-child(2):before{background:#c9d1dc;color:#2b3648}
+.rank li:nth-child(3):before{background:#d9a06a;color:#3d2410}
+.rank li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
+.icon-btn.sm{width:28px;height:28px;font-size:.8rem;background:#eef3fc;color:var(--blu)}
+.icon-btn.sm:hover{background:#dfe9fa}
