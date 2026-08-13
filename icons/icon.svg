@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Olimpiadi Epiche Estive">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b3d91"/>
+      <stop offset="0.6" stop-color="#1657c8"/>
+      <stop offset="1" stop-color="#38a0f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <circle cx="256" cy="150" r="70" fill="none" stroke="#f5a623" stroke-width="20"/>
+  <g fill="none" stroke-width="18">
+    <circle cx="150" cy="300" r="58" stroke="#ffffff"/>
+    <circle cx="256" cy="300" r="58" stroke="#f5a623"/>
+    <circle cx="362" cy="300" r="58" stroke="#e0322c"/>
+    <circle cx="203" cy="352" r="58" stroke="#1a9e5b"/>
+    <circle cx="309" cy="352" r="58" stroke="#a9c9ff"/>
+  </g>
+  <text x="256" y="463" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif"
+        font-size="58" font-weight="700" fill="#ffffff" letter-spacing="6">OEE</text>
+</svg>
