@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Olimpiadi Epiche Estive</title>
+<meta name="description" content="Olimpiadi Epiche Estive - I Edizione. Partecipanti, sport, regolamenti e classifiche in tempo reale.">
+<meta name="theme-color" content="#0b3d91">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Olimpiadi">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#/">
+      <span class="brand-rings" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i>
+      </span>
+      <span class="brand-txt">
+        <strong id="brandName">Olimpiadi Epiche Estive</strong>
+        <small id="brandEdition">I Edizione</small>
+      </span>
+    </a>
+    <div class="topbar-actions">
+      <span id="syncBadge" class="badge" title="Stato dati">…</span>
+      <button id="btnRefresh" class="icon-btn" title="Aggiorna" aria-label="Aggiorna dati">⟳</button>
+    </div>
+  </div>
+</header>
+
+<main id="view" class="view" role="main" aria-live="polite"></main>
+
+<nav class="tabbar" role="navigation" aria-label="Navigazione principale">
+  <a href="#/" data-tab="/"><span>🏛️</span>Home</a>
+  <a href="#/sport" data-tab="/sport"><span>🥇</span>Sport</a>
+  <a href="#/classifica" data-tab="/classifica"><span>📊</span>Classifiche</a>
+  <a href="#/nazioni" data-tab="/nazioni" data-match="/nazioni,/squadre,/atleti"><span>🚩</span>Rose</a>
+  <a href="#/admin" data-tab="/admin"><span>⚙️</span>Admin</a>
+</nav>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="modalRoot"></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
