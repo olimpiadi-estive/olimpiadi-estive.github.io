@@ -17,6 +17,47 @@ export const auth = {
 
 export class ApiError extends Error {}
 
+/** Timeout delle richieste: senza questo una richiesta appesa blocca il sync. */
+const TIMEOUT_LETTURA = 15000;
+const TIMEOUT_SCRITTURA = 45000; // le generazioni scrivono molte righe nel foglio
+
+const LS_LOG = 'oee.log';
+
+/** Registro circolare delle ultime richieste, per la schermata di diagnostica. */
+export const apiLog = {
+  items: [],
+  max: 80,
+  load() {
+    try { this.items = JSON.parse(localStorage.getItem(LS_LOG) || '[]'); }
+    catch { this.items = []; }
+  },
+  push(entry) {
+    this.items.unshift({ ts: Date.now(), ...entry });
+    if (this.items.length > this.max) this.items.length = this.max;
+    try { localStorage.setItem(LS_LOG, JSON.stringify(this.items.slice(0, 40))); }
+    catch { /* quota */ }
+  },
+  clear() {
+    this.items = [];
+    localStorage.removeItem(LS_LOG);
+  },
+  /** Statistiche sintetiche sulle richieste registrate. */
+  stats() {
+    const tot = this.items.length;
+    const ko = this.items.filter(x => !x.ok);
+    const ms = this.items.filter(x => x.ok).map(x => x.ms);
+    return {
+      tot, errori: ko.length,
+      media: ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) : 0,
+      max: ms.length ? Math.max(...ms) : 0,
+      ultimoErrore: ko[0] || null,
+    };
+  },
+};
+apiLog.load();
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 function requireUrl() {
   const url = CONFIG.apiUrl;
   if (!url) throw new ApiError('API non configurata. Apri Admin ▸ Impostazioni e incolla l\'URL del Web App (finisce con /exec).');
@@ -54,14 +95,45 @@ function netError(err) {
   return new ApiError('Impossibile raggiungere il server (' + (err.message || 'rete') + '). Verifica la connessione e che l\'URL sia quello /exec.');
 }
 
-/** Lettura dati (GET, senza preflight CORS). */
-export async function fetchState() {
-  const url = requireUrl() + '?action=state&t=' + Date.now();
-  let res;
+/**
+ * Esegue una richiesta con timeout e la registra nel log.
+ * Senza timeout una richiesta appesa blocca il sync a tempo indefinito.
+ */
+async function request(etichetta, url, opts = {}, timeout = TIMEOUT_LETTURA) {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
-  } catch (err) { throw netError(err); }
-  return readResponse(res);
+    const res = await fetch(url, { redirect: 'follow', ...opts, signal: ctrl.signal });
+    const data = await readResponse(res);
+    apiLog.push({ etichetta, ok: true, ms: Date.now() - t0, status: res.status });
+    return data;
+  } catch (err) {
+    const scaduto = err.name === 'AbortError';
+    const e = scaduto
+      ? new ApiError(`Tempo scaduto dopo ${Math.round(timeout / 1000)}s: rete lenta o Apps Script occupato.`)
+      : netError(err);
+    apiLog.push({ etichetta, ok: false, ms: Date.now() - t0, err: e.message, scaduto });
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Lettura dati (GET, senza preflight CORS). Un tentativo di riserva sui guasti di rete. */
+export async function fetchState({ tentativi = 2 } = {}) {
+  const base = requireUrl();
+  let ultimo;
+  for (let i = 1; i <= tentativi; i++) {
+    try {
+      return await request('lettura' + (i > 1 ? ' (tentativo ' + i + ')' : ''),
+        base + '?action=state&t=' + Date.now(), { method: 'GET', cache: 'no-store' });
+    } catch (err) {
+      ultimo = err;
+      if (i < tentativi) await sleep(700 * i);
+    }
+  }
+  throw ultimo;
 }
 
 /**
@@ -69,33 +141,21 @@ export async function fetchState() {
  * Content-Type text/plain per evitare il preflight OPTIONS che Apps Script non gestisce.
  */
 export async function mutate(action, payload = {}) {
-  const url = requireUrl();
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, pin: auth.pin, payload }),
-    });
-  } catch (err) { throw netError(err); }
-  return readResponse(res);
+  return request(action, requireUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action, pin: auth.pin, payload }),
+  }, TIMEOUT_SCRITTURA);
 }
 
 /** Verifica il PIN admin lato server. */
 export async function checkPin(pin) {
-  const url = requireUrl();
-  let res;
   try {
-    res = await fetch(url, {
+    await request('login', requireUrl(), {
       method: 'POST',
-      redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'login', pin }),
     });
-  } catch (err) { throw netError(err); }
-  try {
-    await readResponse(res);
     return true;
   } catch (err) {
     if (/PIN/i.test(err.message)) return false;

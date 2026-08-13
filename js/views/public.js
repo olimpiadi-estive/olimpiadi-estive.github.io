@@ -6,6 +6,7 @@ import {
   atletiDiNazione, atletiDiSquadra, nazioniDiSquadra, squadreDiAtleta,
   risultatiDiSport, atletiDiRisultato, incontriDiSport, fasiDiSport,
   gironeStandings, esitoIncontro, isConcluso, puntiIncontro,
+  isFinale, risultatiDiIncontro, partecipantiIncontro, isGaraMultipla,
   nazione, atleta, squadra, sport as getSport,
   puntiPerPosizione, puntiSchema, puntiAttivi, refEntity, ZONE, zonaLabel,
   FORMATI, formatoLabel, formatoDi, formatoMeta, isAnnullato,
@@ -263,12 +264,36 @@ function bracketView(sportId) {
     </div>`).join('')}</div>`;
 }
 
+/** Gara con più concorrenti: elenco iscritti e, se registrato, ordine d'arrivo. */
+function garaCard(i) {
+  const refs = partecipantiIncontro(i);
+  const ordine = risultatiDiIncontro(i.id);
+  return `<div class="match gara ${isConcluso(i) ? 'done' : ''}">
+    <div class="meta" style="margin:0 0 .45rem">
+      ${i.data ? '🕒 ' + esc(fmtDate(i.data)) : ''}
+      ${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}
+      · ${refs.length} concorrenti
+      ${!isConcluso(i) ? ' ' + statoPill(i.stato) : ''}
+    </div>
+    ${ordine.length ? `<ol class="arrivo">${ordine.map(r => `
+      <li><span class="pos">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</span>
+        <span class="grow">${esc(nomiRisultato(r))}</span>
+        ${r.punteggio ? `<b class="sc">${esc(r.punteggio)}</b>` : ''}
+        ${entitaChipRisultato(r)}</li>`).join('')}</ol>`
+      : (refs.length
+        ? `<div class="griglia-part">${refs.map(ref => refChip(ref, true)).join('')}</div>
+           <p class="small muted" style="margin:.5rem 0 0">Ordine d'arrivo non ancora registrato.</p>`
+        : '<p class="small muted">Nessun concorrente indicato.</p>')}
+  </div>`;
+}
+
 function listaFasi(sportId) {
   const fasi = fasiDiSport(sportId);
   return fasi.map(f => `
     <div class="fase">
       <h4>${esc(f.fase)}</h4>
-      <div class="match-list">${f.incontri.map(i => matchCard(i)).join('')}</div>
+      <div class="match-list">${f.incontri.map(i =>
+        isGaraMultipla(i) ? garaCard(i) : matchCard(i)).join('')}</div>
     </div>`).join('');
 }
 
@@ -300,7 +325,7 @@ function calendarioPane(s) {
   if (!incontri.length) {
     return `<div class="card">${testa}
       <div class="empty">${formato === 'tutti'
-        ? 'Si gareggia tutti insieme: non ci sono incontri, guarda la classifica.'
+        ? 'Gara non ancora programmata: va creata dal pannello admin con i suoi concorrenti.'
         : 'Nessun incontro in calendario.'}</div>
     </div>`;
   }
@@ -513,7 +538,7 @@ export const nazioneDetail = {
     const row = classifica().find(r => String(r.nazione.id) === String(n.id));
     const roster = atletiDiNazione(n.id);
     const ris = store.data.risultati
-      .filter(r => !r.squadraId && String(r.nazioneId) === String(n.id))
+      .filter(r => !r.squadraId && isFinale(r) && String(r.nazioneId) === String(n.id))
       .sort((a, b) => (Number(a.posizione) || 99) - (Number(b.posizione) || 99));
 
     return `
@@ -600,7 +625,7 @@ export const squadraDetail = {
     const rosa = atletiDiSquadra(s.id);
     const nazioni = nazioniDiSquadra(s.id);
     const ris = store.data.risultati
-      .filter(r => String(r.squadraId) === String(s.id))
+      .filter(r => String(r.squadraId) === String(s.id) && isFinale(r))
       .sort((a, b) => (Number(a.posizione) || 99) - (Number(b.posizione) || 99));
     const ref = 'sqd:' + s.id;
     const inc = store.data.incontri.filter(i => i.latoA === ref || i.latoB === ref);

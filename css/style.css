@@ -346,3 +346,17 @@ tr.podio-3{background:linear-gradient(90deg,rgba(190,120,60,.14),transparent)}
 .rank li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
 .icon-btn.sm{width:28px;height:28px;font-size:.8rem;background:#eef3fc;color:var(--blu)}
 .icon-btn.sm:hover{background:#dfe9fa}
+
+/* ---------- gara con più concorrenti ---------- */
+.match.gara{padding:.7rem .75rem}
+.griglia-part{display:flex;flex-wrap:wrap;gap:.3rem}
+.arrivo{list-style:none;margin:0;padding:0}
+.arrivo li{
+  display:flex;align-items:center;gap:.5rem;padding:.34rem 0;
+  border-bottom:1px dashed var(--line)
+}
+.arrivo li:last-child{border-bottom:0}
+.arrivo .pos{flex:0 0 1.6rem;text-align:center;font-weight:800;font-size:.85rem;color:var(--muted)}
+.arrivo li:nth-child(-n+3) .pos{font-size:1.05rem}
+.arrivo .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
+.arrivo .sc{font-variant-numeric:tabular-nums;color:var(--blu);font-size:.85rem}

@@ -31,12 +31,15 @@ var SCHEMA = {
   SQUADRE:   ['id', 'nome', 'emoji', 'colore', 'atletaIds', 'note', 'sportId'],
   // Chi partecipa a una singola disciplina.
   ISCRIZIONI: ['id', 'sportId', 'atletaId', 'seed', 'note'],
+  // incontroId vuoto = classifica finale della disciplina (assegna le medaglie).
+  // incontroId valorizzato = ordine d'arrivo di quella singola gara o batteria.
   RISULTATI: ['id', 'sportId', 'posizione', 'nazioneId', 'atletaIds', 'punteggio', 'note', 'ts',
-              'squadraId'],
-  // Calendario: un incontro/turno per riga. latoA/latoB sono riferimenti
-  // nella forma "naz:<id>", "sqd:<id>", "atl:<id>" (vuoti nei formati open).
+              'squadraId', 'incontroId'],
+  // Calendario: un evento per riga. latoA/latoB sono riferimenti "naz:<id>", "sqd:<id>",
+  // "atl:<id>" per le sfide; `partecipanti` è l'elenco per le gare a più concorrenti.
   INCONTRI:  ['id', 'sportId', 'fase', 'round', 'ordine', 'data', 'luogo', 'stato',
-              'latoA', 'latoB', 'punteggioA', 'punteggioB', 'vincitore', 'note'],
+              'latoA', 'latoB', 'punteggioA', 'punteggioB', 'vincitore', 'note',
+              'partecipanti'],
   CONFIG:    ['chiave', 'valore']
 };
 
@@ -279,6 +282,7 @@ function remove_(name, id) {
     clearRefs_('atl:' + id);
   }
   if (name === 'ATLETI') removeWhere_('ISCRIZIONI', 'atletaId', id);
+  if (name === 'INCONTRI') removeWhere_('RISULTATI', 'incontroId', id);
   if (name === 'SPORT') {
     removeWhere_('RISULTATI', 'sportId', id);
     removeWhere_('INCONTRI', 'sportId', id);
@@ -458,9 +462,6 @@ function generaCalendario_(p) {
   if (!s) throw new Error('Disciplina non trovata');
 
   var formato = String(p.formato || '').toLowerCase() || formatoDi_(s);
-  if (formato === 'tutti') {
-    throw new Error('Tutti contro tutti è una gara unica: non prevede incontri, registra la classifica finale.');
-  }
 
   var fonte = p.fonte || (s.tipo === 'squadra' || s.tipo === 'coppia' ? 'squadre'
     : (s.tipo === 'nazione' ? 'nazioni' : 'iscritti'));
@@ -476,9 +477,27 @@ function generaCalendario_(p) {
   if (String(p.mescola) === 'true') refs = shuffle_(refs);
 
   var n = refs.length;
-  var partite = []; // {fase, round, ordine, A, B}
+  var partite = []; // {fase, round, ordine, A, B, partecipanti}
 
-  if (formato === 'tabellone') {
+  if (formato === 'tutti') {
+    // Gara unica: tutti in campo insieme. Con più batterie i concorrenti
+    // vengono distribuiti a serpentina per non concentrare i favoriti.
+    var batterie = Math.max(1, Math.min(Number(p.batterie) || 1, Math.floor(n / 2) || 1));
+    var gruppi = [];
+    for (var g = 0; g < batterie; g++) gruppi.push([]);
+    refs.forEach(function (ref, i) {
+      var giro = Math.floor(i / batterie);
+      var pos = giro % 2 === 0 ? i % batterie : batterie - 1 - (i % batterie);
+      gruppi[pos].push(ref);
+    });
+    gruppi.forEach(function (gruppo, i) {
+      if (!gruppo.length) return;
+      partite.push({
+        fase: batterie > 1 ? 'Batteria ' + (i + 1) : 'Gara unica',
+        round: 1, ordine: i + 1, A: '', B: '', partecipanti: gruppo.join(',')
+      });
+    });
+  } else if (formato === 'tabellone') {
     if (n > 32) throw new Error('Troppi partecipanti per un tabellone: ' + n + ' (massimo 32)');
     var br = bracket_(refs);
     for (var r = 1; r <= br.rounds; r++) {
@@ -517,8 +536,9 @@ function generaCalendario_(p) {
     var o = {
       id: newId_(), sportId: String(p.sportId), fase: x.fase, round: String(x.round),
       ordine: String(x.ordine), data: intervallo ? slotTime_(inizio, intervallo, idx) : (idx === 0 ? inizio : ''),
-      luogo: luogo, stato: 'programmato', latoA: x.A, latoB: x.B,
-      punteggioA: '', punteggioB: '', vincitore: '', note: ''
+      luogo: luogo, stato: 'programmato', latoA: x.A || '', latoB: x.B || '',
+      punteggioA: '', punteggioB: '', vincitore: '', note: '',
+      partecipanti: x.partecipanti || ''
     };
     return cols.map(function (c) { return o[c] !== undefined ? String(o[c]) : ''; });
   });
@@ -578,14 +598,34 @@ function propagaVincitore_(p) {
 /* ---------------- classifica finale di una disciplina ---------------- */
 
 /**
- * Sostituisce i risultati di una disciplina con una classifica ordinata.
- * payload: { sportId, ordine: 'atl:1,sqd:2,naz:3' }
- * Le medaglie derivano dalla posizione: 1° oro, 2° argento, 3° bronzo.
+ * Cancella i risultati di una disciplina: solo quelli di un incontro,
+ * oppure solo la classifica finale (le righe senza incontroId).
+ */
+function removeRisultati_(sportId, incontroId) {
+  var cols = SCHEMA.RISULTATI;
+  var iS = cols.indexOf('sportId'), iI = cols.indexOf('incontroId');
+  var sh = sheet_('RISULTATI');
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var vals = sh.getRange(2, 1, last - 1, cols.length).getDisplayValues();
+  for (var i = vals.length - 1; i >= 0; i--) {
+    if (String(vals[i][iS]) !== String(sportId)) continue;
+    var suo = String(vals[i][iI] || '');
+    if (String(incontroId || '') === suo) sh.deleteRow(i + 2);
+  }
+}
+
+/**
+ * Sostituisce una classifica ordinata.
+ * payload: { sportId, ordine: 'atl:1,sqd:2,naz:3', incontroId? }
+ * Senza incontroId è la classifica finale e assegna le medaglie ai primi tre;
+ * con incontroId è l'ordine d'arrivo di quella gara o batteria.
  */
 function setClassificaSport_(p) {
   if (!p.sportId) throw new Error('Disciplina obbligatoria');
   var refs = splitIds_(p.ordine);
-  removeWhere_('RISULTATI', 'sportId', p.sportId);
+  var incontroId = String(p.incontroId || '');
+  removeRisultati_(p.sportId, incontroId);
   if (!refs.length) return { sportId: p.sportId, posizioni: 0 };
 
   var atleti = rows_('ATLETI');
@@ -598,7 +638,8 @@ function setClassificaSport_(p) {
     var tipo = parti[0], rid = parti[1];
     var o = {
       id: newId_(), sportId: String(p.sportId), posizione: String(i + 1),
-      nazioneId: '', atletaIds: '', punteggio: '', note: '', ts: ts, squadraId: ''
+      nazioneId: '', atletaIds: '', punteggio: '', note: '', ts: ts, squadraId: '',
+      incontroId: incontroId
     };
     if (tipo === 'sqd') {
       o.squadraId = rid;
@@ -612,7 +653,7 @@ function setClassificaSport_(p) {
     return cols.map(function (c) { return o[c] !== undefined ? String(o[c]) : ''; });
   });
   appendRows_('RISULTATI', rows);
-  return { sportId: p.sportId, posizioni: rows.length };
+  return { sportId: p.sportId, incontroId: incontroId, posizioni: rows.length };
 }
 
 /* ---------------- utilità ---------------- */

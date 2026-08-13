@@ -4,6 +4,7 @@ import {
   store, nazioniSorted, atletiSorted, squadreSorted, sportSorted,
   atletiDiNazione, atletiDiSquadra, risultatiDiSport, incontriDiSport,
   iscrittiDiSport, isIscritto, squadreDiSport, partecipantiDiSport,
+  risultatiDiIncontro, partecipantiIncontro, isGaraMultipla,
   nazione, atleta, squadra, sport as getSport, incontro,
   puntiSchema, puntiAttivi, refOptions, refOptionsSport, refEntity, idList,
   ZONE, FORMATI, STATI_SPORT, STATI_INCONTRO,
@@ -119,7 +120,13 @@ const incontroFields = (sportId) => [
     options: STATI_INCONTRO.map(s => ({ v: s.v, l: s.l })),
     hint: 'Appena metti "concluso" il vincitore avanza nel tabellone.',
   },
-  { k: 'latoA', label: 'Lato A', type: 'select', options: refOptionsSport(sportId) },
+  {
+    k: 'partecipanti', label: 'Concorrenti (gara con più partecipanti)', type: 'select',
+    attrs: 'multiple size="8"',
+    options: refOptionsSport(sportId, { vuoto: '' }).filter(o => o.v),
+    hint: 'Per le gare uniche: seleziona tutti i concorrenti e lascia vuoti i due lati.',
+  },
+  { k: 'latoA', label: 'Lato A (sfida uno contro uno)', type: 'select', options: refOptionsSport(sportId) },
   { k: 'punteggioA', label: 'Punteggio A' },
   { k: 'latoB', label: 'Lato B', type: 'select', options: refOptionsSport(sportId) },
   { k: 'punteggioB', label: 'Punteggio B' },
@@ -191,19 +198,27 @@ function editRow(kind, fields, action, values, title) {
     onOk: async (form) => {
       const v = formValues(form);
       if (kind === 'risultato' || kind === 'squadra') v.atletaIds = multiValues(form, 'atletaIds');
+      if (kind === 'incontro') v.partecipanti = multiValues(form, 'partecipanti');
       if (kind === 'risultato' && !v.squadraId && !v.nazioneId) {
         toast('Indica la squadra oppure la nazione', 'err');
         return false;
       }
-      if (kind === 'incontro' && v.latoA && v.latoA === v.latoB) {
-        toast('I due lati devono essere diversi', 'err');
-        return false;
+      if (kind === 'incontro') {
+        if (v.latoA && v.latoA === v.latoB) {
+          toast('I due lati devono essere diversi', 'err');
+          return false;
+        }
+        if (!v.latoA && !v.latoB && !v.partecipanti) {
+          toast('Indica i due lati oppure l\'elenco dei concorrenti', 'err');
+          return false;
+        }
       }
       if (values?.id) v.id = values.id;
       return await save(action, v);
     },
   });
   if (kind === 'risultato' || kind === 'squadra') preselect('atletaIds', values?.atletaIds);
+  if (kind === 'incontro') preselect('partecipanti', values?.partecipanti);
 }
 
 function del(action, id, nome) {
@@ -498,20 +513,26 @@ function paneCalendario() {
     ${parts.length >= 2 ? previsione(formato, parts.length) : 'Servono almeno 2 partecipanti.'}
   </div>
   <div class="btn-row" style="margin-bottom:.8rem">
-    <button class="btn gold" data-gen="calendario" ${meta.genera && parts.length >= 2 ? '' : 'disabled'}>⚡ Genera calendario</button>
-    <button class="btn" data-new="incontro">+ Incontro a mano</button>
+    <button class="btn gold" data-gen="calendario" ${parts.length >= 2 ? '' : 'disabled'}>⚡ ${formato === 'tutti' ? 'Crea la gara' : 'Genera calendario'}</button>
+    <button class="btn" data-new="incontro">+ ${formato === 'tutti' ? 'Gara a mano' : 'Incontro a mano'}</button>
     ${inc.length ? '<button class="btn danger sm" data-gen="svuota">Svuota calendario</button>' : ''}
   </div>
   ${inc.length ? `<div class="list">${inc.map(i => {
+    const gara = isGaraMultipla(i);
     const a = refEntity(i.latoA); const b = refEntity(i.latoB);
-    const testa = (a || b)
-      ? `${a ? esc(a.emoji + ' ' + a.nome) : '<i class="muted">da definire</i>'} <span class="vs">vs</span> ${b ? esc(b.emoji + ' ' + b.nome) : '<i class="muted">da definire</i>'}`
-      : '<i class="muted">avversari da definire</i>';
-    const score = (i.punteggioA || i.punteggioB) ? ` · ${esc(i.punteggioA || '—')}-${esc(i.punteggioB || '—')}` : '';
+    const ordine = risultatiDiIncontro(i.id);
+    const testa = gara
+      ? `${partecipantiIncontro(i).length} concorrenti`
+      : ((a || b)
+        ? `${a ? esc(a.emoji + ' ' + a.nome) : '<i class="muted">da definire</i>'} <span class="vs">vs</span> ${b ? esc(b.emoji + ' ' + b.nome) : '<i class="muted">da definire</i>'}`
+        : '<i class="muted">avversari da definire</i>');
+    const score = gara
+      ? (ordine.length ? ' · 🥇 ' + esc(nomiRisultato(ordine[0])) : ' · ordine d\'arrivo da registrare')
+      : ((i.punteggioA || i.punteggioB) ? ` · ${esc(i.punteggioA || '—')}-${esc(i.punteggioB || '—')}` : '');
     return `<div class="row-item">
       <span class="grow"><b>${testa}</b>
         <span class="small muted">${esc(i.fase || 'Fase da definire')}${i.data ? ' · ' + esc(fmtDate(i.data)) : ''}${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}${score}</span></span>
-      ${statoPill(i.stato)}
+      ${gara ? `<button class="btn gold sm" data-cls="${esc(s.id)}" data-inc="${esc(i.id)}">Arrivi</button>` : statoPill(i.stato)}
       ${actions('incontro', i.id)}
     </div>`;
   }).join('')}</div>` : `<div class="empty">${meta.genera
@@ -519,7 +540,13 @@ function paneCalendario() {
     : 'Gara unica: non serve un calendario di incontri.'}</div>`}`;
 }
 
-function previsione(formato, n) {
+function previsione(formato, n, batterie = 1) {
+  if (formato === 'tutti') {
+    const b = Math.max(1, Number(batterie) || 1);
+    return b > 1
+      ? `${b} batterie da circa ${Math.ceil(n / b)} concorrenti, con l'ordine d'arrivo di ognuna.`
+      : `Una gara unica con tutti i ${n} concorrenti e il suo ordine d'arrivo.`;
+  }
   if (formato === 'scontro') {
     return `Ogni partecipante affronta gli altri una volta: ${n * (n - 1) / 2} partite, ` +
       `${n % 2 ? n : n - 1} giornate, ${n - 1} incontri a testa. Nessun ritorno.`;
@@ -568,28 +595,38 @@ function paneClassifiche() {
   }).join('')}`;
 }
 
-/** Editor della classifica finale: ordina i partecipanti dal primo all'ultimo. */
-function apriClassifica(sportId) {
+const refDiRisultato = r => r.squadraId ? 'sqd:' + r.squadraId
+  : (idList(r.atletaIds)[0] ? 'atl:' + idList(r.atletaIds)[0] : 'naz:' + r.nazioneId);
+
+/**
+ * Editor di una classifica ordinata.
+ * Senza incontroId è la classifica finale della disciplina e assegna le medaglie;
+ * con incontroId è l'ordine d'arrivo di quella gara o batteria.
+ */
+function apriClassifica(sportId, incontroId) {
   const s = getSport(sportId);
   if (!s) return;
-  const ris = risultatiDiSport(sportId);
-  const attuali = ris.map(r => r.squadraId ? 'sqd:' + r.squadraId
-    : (idList(r.atletaIds)[0] ? 'atl:' + idList(r.atletaIds)[0] : 'naz:' + r.nazioneId));
-  const candidati = partecipantiDiSport(sportId);
+  const inc = incontroId ? incontro(incontroId) : null;
+  const ris = inc ? risultatiDiIncontro(inc.id) : risultatiDiSport(sportId);
+  const attuali = ris.map(refDiRisultato);
+  const candidati = inc ? partecipantiIncontro(inc) : partecipantiDiSport(sportId);
   const ordine = [...attuali, ...candidati.filter(c => !attuali.includes(c))]
     .filter(ref => refEntity(ref));
 
   if (!ordine.length) {
-    toast('Nessun partecipante: registra gli iscritti o crea le squadre', 'err');
+    toast(inc ? 'Questa gara non ha concorrenti: modificala e aggiungili'
+      : 'Nessun partecipante: registra gli iscritti o crea le squadre', 'err');
     return;
   }
 
   openModal({
-    title: 'Classifica di ' + s.nome,
-    okText: 'Salva classifica',
+    title: inc ? 'Arrivi · ' + (inc.fase || s.nome) : 'Classifica finale · ' + s.nome,
+    okText: 'Salva',
     body: `
-      <p class="small muted">Trascina no: usa le frecce per ordinare. Il primo prende l'oro,
-      il secondo l'argento, il terzo il bronzo. Togli chi non ha gareggiato.</p>
+      <p class="small muted">Usa le frecce per ordinare dal primo all'ultimo, ✕ per togliere
+      chi non ha gareggiato. ${inc
+        ? 'Questo è l\'ordine d\'arrivo della gara: non assegna medaglie.'
+        : 'Il primo prende l\'oro, il secondo l\'argento, il terzo il bronzo.'}</p>
       <ol class="rank" id="rankList">
         ${ordine.map(ref => {
           const e = refEntity(ref);
@@ -603,7 +640,10 @@ function apriClassifica(sportId) {
       </ol>`,
     onOk: async () => {
       const refs = [...document.querySelectorAll('#rankList li')].map(li => li.dataset.ref);
-      return await save('setClassificaSport', { sportId, ordine: refs.join(',') }, 'Classifica salvata');
+      const out = await save('setClassificaSport',
+        { sportId, incontroId: incontroId || '', ordine: refs.join(',') }, 'Ordine salvato');
+      if (out) redrawPane();
+      return out !== false;
     },
   });
 
@@ -730,11 +770,17 @@ function apriGeneraCalendario(sportId) {
   const formato = formatoDi(s);
   const parts = partecipantiDiSport(sportId);
   openModal({
-    title: 'Genera calendario · ' + s.nome,
-    okText: 'Genera',
-    body: `<div class="alert warn">Gli incontri già presenti in questa disciplina verranno sostituiti.</div>
-      <p class="small muted">${esc(previsione(formato, parts.length))}</p>` +
+    title: (formato === 'tutti' ? 'Crea la gara · ' : 'Genera calendario · ') + s.nome,
+    okText: formato === 'tutti' ? 'Crea' : 'Genera',
+    body: `<div class="alert warn">Gli eventi già presenti in questa disciplina, e i loro arrivi,
+      verranno sostituiti.</div>
+      <p class="small muted" id="prevGen">${esc(previsione(formato, parts.length))}</p>` +
       renderFields([
+        ...(formato === 'tutti' ? [{
+          k: 'batterie', label: 'Quante gare o batterie', type: 'number', def: '1',
+          attrs: 'min="1" max="' + Math.max(1, Math.floor(parts.length / 2)) + '"',
+          hint: 'Una sola gara con tutti, oppure più batterie con i concorrenti distribuiti a serpentina.',
+        }] : []),
         {
           k: 'fonte', label: 'Partecipanti', type: 'select',
           def: s.tipo === 'squadra' || s.tipo === 'coppia' ? 'squadre' : (s.tipo === 'nazione' ? 'nazioni' : 'iscritti'),
@@ -753,11 +799,18 @@ function apriGeneraCalendario(sportId) {
         { k: 'luogo', label: 'Luogo', def: s.luogo || '' },
       ]),
     onOk: async form => {
-      const out = await save('generaCalendario', { sportId, ...formValues(form) }, 'Calendario generato');
-      if (out && out.partite) toast(out.partite + ' partite create', 'ok');
+      const out = await save('generaCalendario', { sportId, ...formValues(form) },
+        formato === 'tutti' ? 'Gara creata' : 'Calendario generato');
+      if (out && out.partite) toast(out.partite + (formato === 'tutti' ? ' gare create' : ' partite create'), 'ok');
       if (out) redrawPane();
       return out !== false;
     },
+  });
+
+  // la previsione si aggiorna se cambi il numero di batterie
+  document.querySelector('[name="batterie"]')?.addEventListener('input', e => {
+    const el = document.getElementById('prevGen');
+    if (el) el.textContent = previsione(formato, parts.length, e.target.value);
   });
 }
 
@@ -819,7 +872,7 @@ function bindPane() {
 
   // classifica per disciplina
   pane.querySelectorAll('[data-cls]').forEach(b =>
-    b.addEventListener('click', () => apriClassifica(b.dataset.cls)));
+    b.addEventListener('click', () => apriClassifica(b.dataset.cls, b.dataset.inc || '')));
 
   pane.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
     switch (b.dataset.new) {

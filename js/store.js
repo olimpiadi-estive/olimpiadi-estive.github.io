@@ -90,19 +90,30 @@ export const store = {
     } catch { /* quota */ }
   },
 
+  fails: 0,
+  startedAt: 0,
+  lastMs: 0,
+
   async refresh({ silent = false } = {}) {
-    if (this.loading) return;
+    // Guardia: se una richiesta precedente è rimasta appesa oltre il suo timeout
+    // la consideriamo persa, altrimenti il sync resterebbe bloccato per sempre.
+    if (this.loading && Date.now() - this.startedAt < 20000) return;
+
     this.loading = true;
+    this.startedAt = Date.now();
     this.error = null;
     if (!silent) this.emit();
     try {
       const data = await fetchState();
       this.data = { ...EMPTY, ...data };
       this.lastSync = Date.now();
+      this.lastMs = Date.now() - this.startedAt;
       this.fromCache = false;
+      this.fails = 0;
       this.saveCache();
     } catch (err) {
       this.error = err.message || String(err);
+      this.fails++;
     } finally {
       this.loading = false;
       this.emit();
@@ -272,11 +283,32 @@ export function refOptions({ vuoto = '— da definire —' } = {}) {
 
 /* ---------- risultati ---------- */
 
+const perPosizione = (a, b) => (Number(a.posizione) || 99) - (Number(b.posizione) || 99);
+
+/** Le medaglie arrivano solo dalla classifica finale: righe senza incontroId. */
+export const isFinale = r => !r.incontroId;
+
+/** Classifica finale di una disciplina. */
 export function risultatiDiSport(sportId) {
   return store.data.risultati
-    .filter(r => String(r.sportId) === String(sportId))
-    .sort((a, b) => (Number(a.posizione) || 99) - (Number(b.posizione) || 99));
+    .filter(r => String(r.sportId) === String(sportId) && isFinale(r))
+    .sort(perPosizione);
 }
+
+/** Ordine d'arrivo di una singola gara o batteria. */
+export function risultatiDiIncontro(incontroId) {
+  return store.data.risultati
+    .filter(r => String(r.incontroId || '') === String(incontroId))
+    .sort(perPosizione);
+}
+
+/** Partecipanti di una gara a più concorrenti, come riferimenti. */
+export function partecipantiIncontro(i) {
+  return idList(i?.partecipanti);
+}
+
+/** Una gara unica o batteria: nessun lato, un elenco di concorrenti. */
+export const isGaraMultipla = i => !i?.latoA && !i?.latoB && partecipantiIncontro(i).length > 0;
 
 /** Atleti che incassano i punti di un risultato (squadra inclusa). */
 export function atletiDiRisultato(r) {
@@ -358,7 +390,7 @@ export function classifica() {
   const rows = new Map();
   store.data.nazioni.forEach(n => rows.set(String(n.id), vuotaRiga({ nazione: n, nome: n.nome })));
   store.data.risultati.forEach(r => {
-    if (r.squadraId) return;
+    if (r.squadraId || !isFinale(r)) return;
     const row = rows.get(String(r.nazioneId));
     if (!row) return;
     const pos = Number(r.posizione) || 0;
@@ -396,7 +428,7 @@ export function classificaSquadre() {
   const rows = new Map();
   store.data.squadre.forEach(s => rows.set(String(s.id), vuotaRiga({ squadra: s, nome: s.nome })));
   store.data.risultati.forEach(r => {
-    if (!r.squadraId) return;
+    if (!r.squadraId || !isFinale(r)) return;
     const row = rows.get(String(r.squadraId));
     if (!row) return;
     const pos = Number(r.posizione) || 0;
@@ -418,6 +450,7 @@ export function classificaAtleti() {
   const rows = new Map();
   store.data.atleti.forEach(a => rows.set(String(a.id), vuotaRiga({ atleta: a, nome: a.nome })));
   store.data.risultati.forEach(r => {
+    if (!isFinale(r)) return;
     const pos = Number(r.posizione) || 0;
     const pts = puntiPerPosizione(sport(r.sportId), pos);
     atletiDiRisultato(r).forEach(a => {
@@ -582,7 +615,8 @@ export function statsGlobali() {
 }
 
 export function ultimiRisultati(n = 8) {
-  return [...store.data.risultati]
+  return store.data.risultati
+    .filter(isFinale)
     .sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0))
     .slice(0, n);
 }
