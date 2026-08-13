@@ -64,13 +64,13 @@ git push -u origin main
 
 ## 3. Collegare app e dati
 
-Due possibilità:
+L'URL è già scritto in `API_URL` dentro [`js/config.js`](js/config.js): vale per **tutti** i
+visitatori, che non devono configurare niente. Per puntare a un altro foglio, cambia quella riga.
 
-- **In app (nessuna modifica al codice):** apri l'app ▸ tab **Admin** ▸ incolla l'URL `/exec`.
-  Viene salvato nel browser di chi lo inserisce.
-- **Per tutti (consigliato):** apri `js/config.js` e imposta
-  `API_URL: 'https://script.google.com/macros/s/…/exec'`, poi committa. Così chiunque apra
-  il link vede i dati senza configurare nulla.
+In alternativa, dall'app: **Admin ▸ Impostazioni ▸ Cambia URL API**. Attenzione, quell'override
+vale **solo nel browser in cui lo fai** (è salvato in `localStorage`) e nasconde il valore di
+`config.js`: la stessa scheda mostra quale dei due è in uso e il pulsante *Usa il predefinito* per
+tornare indietro.
 
 Poi: Admin ▸ PIN ▸ inserisci nazioni, atleti, sport, risultati.
 
