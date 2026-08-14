@@ -330,19 +330,23 @@ tr.podio-3{background:linear-gradient(90deg,rgba(190,120,60,.14),transparent)}
 .check .grow b{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- editor della classifica ---------- */
-.rank{list-style:none;margin:0;padding:0;counter-reset:pos}
+.rank{list-style:none;margin:0;padding:0}
 .rank li{
-  counter-increment:pos;display:flex;align-items:center;gap:.4rem;
+  display:flex;align-items:center;gap:.4rem;
   border:1px solid var(--line);border-radius:11px;padding:.5rem .6rem;margin-bottom:.4rem;background:#fff
 }
-.rank li:before{
-  content:counter(pos);flex:0 0 1.7rem;height:1.7rem;border-radius:50%;
-  background:#eef3fc;color:var(--blu);font-weight:800;font-size:.8rem;
-  display:grid;place-items:center
+.rank li .pos{
+  flex:0 0 2rem;text-align:center;font-weight:800;font-size:.9rem;color:var(--muted)
 }
-.rank li:nth-child(1):before{background:var(--oro);color:#40260a}
-.rank li:nth-child(2):before{background:#c9d1dc;color:#2b3648}
-.rank li:nth-child(3):before{background:#d9a06a;color:#3d2410}
+/* pari merito: agganciata visivamente alla riga sopra */
+.rank li.exaequo{
+  margin-top:-.4rem;border-top-left-radius:0;border-top-right-radius:0;
+  border-top-style:dashed;background:#f7faff
+}
+.rank li.exaequo .pos{opacity:.55}
+.rank li[data-pos="1"] .pos{color:#8a5a06}
+.rank li[data-pos="2"] .pos{color:#5b6675}
+.rank li[data-pos="3"] .pos{color:#8a5426}
 .rank li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
 .icon-btn.sm{width:28px;height:28px;font-size:.8rem;background:#eef3fc;color:var(--blu)}
 .icon-btn.sm:hover{background:#dfe9fa}

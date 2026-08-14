@@ -143,7 +143,7 @@ export const home = {
     ${podio.length ? `
     <div class="section-head"><h2>🏅 Medagliere</h2><a class="small" href="#/classifica">Tutto il medagliere →</a></div>
     <div class="card">${tabellaMedagliere(podio, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
-      ${flagChip(nazione(r.atleta.nazioneId), true)}`)}</div>` : ''}
+      <span class="small muted"> · ${esc(nazione(r.atleta.nazioneId)?.citta || '')}</span>`)}</div>` : ''}
 
     ${attivi.length ? `
     <div class="section-head"><h2>🔴 In corso adesso</h2></div>
@@ -157,7 +157,6 @@ export const home = {
         <span style="font-size:1.3rem">${MEDAL[Number(r.posizione)] || '🎽'}</span>
         <span class="grow"><b>${esc(nomiRisultato(r))}</b>
           <span class="small muted">${esc(s?.nome || 'Sport')} · ${ordinal(r.posizione)}${r.punteggio ? ' · ' + esc(r.punteggio) : ''}</span></span>
-        ${entitaChipRisultato(r)}
       </a>`;
     }).join('')}</div>` : ''}
 
@@ -284,8 +283,7 @@ function garaCard(i) {
     ${ordine.length ? `<ol class="arrivo">${ordine.map(r => `
       <li><span class="pos">${MEDAL[Number(r.posizione)] || ordinal(r.posizione)}</span>
         <span class="grow">${esc(nomiRisultato(r))}</span>
-        ${r.punteggio ? `<b class="sc">${esc(r.punteggio)}</b>` : ''}
-        ${entitaChipRisultato(r)}</li>`).join('')}</ol>`
+        ${r.punteggio ? `<b class="sc">${esc(r.punteggio)}</b>` : ''}</li>`).join('')}</ol>`
       : (refs.length
         ? `<div class="griglia-part">${refs.map(ref => refChip(ref, true)).join('')}</div>
            <p class="small muted" style="margin:.5rem 0 0">Ordine d'arrivo non ancora registrato.</p>`
@@ -364,8 +362,7 @@ function iscrittiPane(s) {
     ${isc.length ? `<div class="list">${isc.map(a => `
       <div class="row-item">${avatar(a)}
         <span class="grow"><b>${esc(a.nome)}</b>
-          <span class="small muted">${esc(a.ruolo || 'Atleta')}</span></span>
-        ${flagChip(nazione(a.nazioneId), true)}
+          <span class="small muted">${esc(nazione(a.nazioneId)?.citta || '')}</span></span>
       </div>`).join('')}</div>`
       : '<div class="empty">Nessun iscritto registrato per questa disciplina.</div>'}
   </div>`;
@@ -564,11 +561,10 @@ export const nazioneDetail = {
 
     <div class="section-head"><h2>Atleti</h2></div>
     ${roster.length ? `<div class="list">${roster.map(a => {
-      const sq = squadreDiAtleta(a.id);
+      const st = classificaAtleti().find(r => String(r.atleta.id) === String(a.id));
       return `<div class="row-item">${avatar(a)}
         <span class="grow"><b>${esc(a.nome)}</b>
-          <span class="small muted">${esc(a.ruolo || 'Atleta')}</span></span>
-        ${sq.map(s => squadraChip(s, true)).join(' ')}
+          <span class="small muted">${st ? `🥇${st.oro} 🥈${st.argento} 🥉${st.bronzo}` : 'nessuna medaglia'}</span></span>
       </div>`;
     }).join('')}</div>`
       : '<div class="empty">Nessun atleta assegnato.</div>'}
@@ -656,8 +652,7 @@ export const squadraDetail = {
     ${rosa.length ? `<div class="list">${rosa.map(a => `
       <div class="row-item">${avatar(a)}
         <span class="grow"><b>${esc(a.nome)}</b>
-          <span class="small muted">${esc(a.ruolo || 'Atleta')}</span></span>
-        ${flagChip(nazione(a.nazioneId), true)}
+          <span class="small muted">${esc(nazione(a.nazioneId)?.citta || '')}</span></span>
       </div>`).join('')}</div>`
       : '<div class="empty">Nessun componente assegnato.</div>'}
 
@@ -738,11 +733,12 @@ export const atletiList = {
 
 function atletaRow(a) {
   const stats = classificaAtleti().find(r => String(r.atleta.id) === String(a.id));
-  const sq = squadreDiAtleta(a.id);
+  const n = nazione(a.nazioneId);
+  const medaglie = stats ? `🥇${stats.oro} 🥈${stats.argento} 🥉${stats.bronzo}` : '';
   return `<div class="row-item">${avatar(a)}
     <span class="grow"><b>${esc(a.nome)}</b>
-      <span class="small muted">${esc(a.ruolo || 'Atleta')}${stats ? ` · ${stats.punti} pt · 🥇${stats.oro}` : ''}</span></span>
-    <span class="chips-inline">${sq.map(s => squadraChip(s, true)).join('')}${flagChip(nazione(a.nazioneId), true)}</span></div>`;
+      <span class="small muted">${esc(n?.citta || n?.nome || 'senza nazione')}${medaglie ? ' · ' + medaglie : ''}</span></span>
+  </div>`;
 }
 
 /* ---------- CLASSIFICHE ---------- */
@@ -785,7 +781,7 @@ export const classificaView = {
 
     <div class="card" data-pane="atl">
       ${atl.length ? tabellaMedagliere(atl, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
-          ${flagChip(nazione(r.atleta.nazioneId), true)}`) +
+          <span class="small muted"> · ${esc(nazione(r.atleta.nazioneId)?.citta || '')}</span>`) +
         `<p class="small muted" style="margin-top:.7rem">${notaOrdinamento()}
         Conta tutto: medaglie prese da soli, in squadra e con la nazione.</p>`
         : '<div class="empty">Nessuna medaglia assegnata: compila la classifica di una disciplina.</div>'}

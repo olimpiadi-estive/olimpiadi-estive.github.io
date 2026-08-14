@@ -632,6 +632,14 @@ function apriClassifica(sportId, incontroId) {
   const ordine = [...attuali, ...candidati.filter(c => !attuali.includes(c))]
     .filter(ref => refEntity(ref));
 
+  // ricostruisco i pari merito già salvati: stessa posizione del precedente
+  const gruppiAttuali = {};
+  ris.forEach((r, i) => {
+    if (i > 0 && Number(r.posizione) === Number(ris[i - 1].posizione)) {
+      gruppiAttuali[refDiRisultato(r)] = true;
+    }
+  });
+
   if (!ordine.length) {
     toast(inc ? 'Questa gara non ha concorrenti: modificala e aggiungili'
       : 'Nessun partecipante: registra gli iscritti o crea le squadre', 'err');
@@ -647,35 +655,65 @@ function apriClassifica(sportId, incontroId) {
         ? 'Questo è l\'ordine d\'arrivo della gara: non assegna medaglie.'
         : 'Il primo prende l\'oro, il secondo l\'argento, il terzo il bronzo.'}</p>
       <ol class="rank" id="rankList">
-        ${ordine.map(ref => {
+        ${ordine.map((ref, idx) => {
           const e = refEntity(ref);
-          return `<li data-ref="${esc(ref)}">
-            <span class="grow">${esc(e.emoji + ' ' + e.nome)}</span>
+          const pari = idx > 0 && gruppiAttuali[ref] === true;
+          return `<li data-ref="${esc(ref)}" class="${pari ? 'exaequo' : ''}">
+            <span class="pos"></span>
+            <span class="grow">${esc(e.nome)}</span>
+            <button type="button" class="icon-btn sm" data-eq title="Pari merito con chi sta sopra">=</button>
             <button type="button" class="icon-btn sm" data-up title="Su">▲</button>
             <button type="button" class="icon-btn sm" data-down title="Giù">▼</button>
             <button type="button" class="icon-btn sm" data-out title="Togli">✕</button>
           </li>`;
         }).join('')}
       </ol>
+      <p class="small muted">Il tasto <b>=</b> mette una riga a pari merito con quella sopra.
+      Due primi ex aequo occupano il primo posto e il successivo prende il bronzo.</p>
       ${inc ? `<label class="fld" style="display:flex;gap:.5rem;align-items:flex-start;margin-top:.4rem">
-        <input type="checkbox" name="finale" style="width:auto;margin-top:.2rem" ${gareDiSport(sportId).length <= 1 ? 'checked' : ''}>
+        <input type="checkbox" name="finale" style="width:auto;margin-top:.2rem" checked>
         <span style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--txt)">
-          Aggiorna anche la <b>classifica finale</b> della disciplina (assegna le medaglie).
+          Aggiorna anche la <b>classifica finale</b> della disciplina, quella che assegna le medaglie.
           ${gareDiSport(sportId).length > 1
-            ? 'Con ' + gareDiSport(sportId).length + ' batterie la finale viene ricomposta intrecciando gli arrivi di tutte.'
-            : ''}
+            ? 'Con ' + gareDiSport(sportId).length + ' gare viene ricomposta intrecciando gli arrivi di tutte.'
+            : 'Consigliato: senza questo il medagliere non cambia.'}
         </span>
       </label>` : ''}`,
     onOk: async (form) => {
-      const refs = [...document.querySelectorAll('#rankList li')].map(li => li.dataset.ref);
       const finale = form.querySelector('[name="finale"]')?.checked ? 'true' : 'false';
       const out = await save('setClassificaSport',
-        { sportId, incontroId: incontroId || '', ordine: refs.join(','), finale }, 'Ordine salvato');
-      if (out?.finale) toast('Classifica finale aggiornata: ' + out.finale.posizioni + ' posizioni', 'ok');
+        { sportId, incontroId: incontroId || '', ordine: ordineConPari(), finale }, 'Ordine salvato');
+      if (out?.finale) toast('Medagliere aggiornato: ' + out.finale.posizioni + ' posizioni', 'ok');
       if (out) redrawPane();
       return out !== false;
     },
   });
+
+  // "atl:1+atl:2,atl:3": il + unisce i pari merito, la virgola separa le posizioni
+  function ordineConPari() {
+    const gruppi = [];
+    document.querySelectorAll('#rankList li').forEach(li => {
+      if (li.classList.contains('exaequo') && gruppi.length) {
+        gruppi[gruppi.length - 1].push(li.dataset.ref);
+      } else {
+        gruppi.push([li.dataset.ref]);
+      }
+    });
+    return gruppi.map(g => g.join('+')).join(',');
+  }
+
+  /** Numerazione con pari merito: 1, 1, 3, 4… (la prima riga non può essere ex aequo) */
+  function rinumera() {
+    let pos = 0, contati = 0;
+    document.querySelectorAll('#rankList li').forEach((li, i) => {
+      if (i === 0) li.classList.remove('exaequo');
+      const pari = i > 0 && li.classList.contains('exaequo');
+      if (!pari) pos = contati + 1;
+      contati++;
+      li.dataset.pos = pos;
+      li.querySelector('.pos').textContent = MEDAL[pos] || pos + '°';
+    });
+  }
 
   const list = document.getElementById('rankList');
   list?.addEventListener('click', e => {
@@ -688,8 +726,12 @@ function apriClassifica(sportId, incontroId) {
       li.parentNode.insertBefore(li.nextElementSibling, li);
     } else if (btn.hasAttribute('data-out')) {
       li.remove();
+    } else if (btn.hasAttribute('data-eq')) {
+      li.classList.toggle('exaequo');
     }
+    rinumera();
   });
+  rinumera();
 }
 
 /* ---------- nazioni e atleti ---------- */

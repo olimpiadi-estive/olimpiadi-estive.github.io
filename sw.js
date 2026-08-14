@@ -1,5 +1,5 @@
 /* Service worker — Olimpiadi Epiche Estive */
-const VERSION = 'oee-v7';
+const VERSION = 'oee-v8';
 const SHELL = [
   './',
   './index.html',

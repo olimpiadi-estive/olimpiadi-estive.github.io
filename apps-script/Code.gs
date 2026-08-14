@@ -126,6 +126,7 @@ function handle_(req) {
           break;
         case 'deleteRisultato': out = remove_('RISULTATI', p.id); break;
         case 'setClassificaSport': out = setClassificaSport_(p); break;
+        case 'componiFinale':   out = componiFinale_(p); break;
         case 'upsertIncontro':
           validateIncontro_(p);
           out = upsert_('INCONTRI', p);
@@ -687,10 +688,17 @@ function removeRisultati_(sportId, incontroId) {
  */
 function setClassificaSport_(p) {
   if (!p.sportId) throw new Error('Disciplina obbligatoria');
-  var refs = splitIds_(p.ordine);
+  var gruppi = parseOrdine_(p.ordine);
   var incontroId = String(p.incontroId || '');
   removeRisultati_(p.sportId, incontroId);
-  if (!refs.length) return { sportId: p.sportId, posizioni: 0 };
+  if (!gruppi.length) return { sportId: p.sportId, posizioni: 0 };
+
+  // posizioni con pari merito: due primi ex aequo occupano 1 e 1, il successivo è 3
+  var refs = [], posizioni = [], pos = 1;
+  gruppi.forEach(function (g) {
+    g.forEach(function (ref) { refs.push(ref); posizioni.push(pos); });
+    pos += g.length;
+  });
 
   var atleti = rows_('ATLETI');
   var squadre = rows_('SQUADRE');
@@ -701,7 +709,7 @@ function setClassificaSport_(p) {
     var parti = String(ref).split(':');
     var tipo = parti[0], rid = parti[1];
     var o = {
-      id: newId_(), sportId: String(p.sportId), posizione: String(i + 1),
+      id: newId_(), sportId: String(p.sportId), posizione: String(posizioni[i]),
       nazioneId: '', atletaIds: '', punteggio: '', note: '', ts: ts, squadraId: '',
       incontroId: incontroId
     };
@@ -717,10 +725,91 @@ function setClassificaSport_(p) {
     return cols.map(function (c) { return o[c] !== undefined ? String(o[c]) : ''; });
   });
   appendRows_('RISULTATI', rows);
-  return { sportId: p.sportId, incontroId: incontroId, posizioni: rows.length };
+
+  var out = { sportId: p.sportId, incontroId: incontroId, posizioni: rows.length };
+  // gli arrivi di una gara ricompongono anche la classifica finale, salvo rifiuto esplicito
+  if (incontroId && String(p.finale) !== 'false') {
+    out.finale = componiFinale_({ sportId: p.sportId });
+  }
+  return out;
+}
+
+/** Riferimento "atl:/sqd:/naz:" di una riga di risultato. */
+function refDiRisultato_(r) {
+  if (r.squadraId) return 'sqd:' + r.squadraId;
+  var atl = splitIds_(r.atletaIds);
+  if (atl.length) return 'atl:' + atl[0];
+  return r.nazioneId ? 'naz:' + r.nazioneId : '';
+}
+
+/**
+ * Compone la classifica finale di una disciplina dagli arrivi delle sue gare.
+ * Con una gara sola e una copia fedele, pari merito compresi; con piu batterie
+ * intreccia le posizioni (tutti i primi, poi tutti i secondi...).
+ */
+function componiFinale_(p) {
+  if (!p.sportId) throw new Error('Disciplina obbligatoria');
+
+  var ordineGare = {};
+  rows_('INCONTRI').forEach(function (i) {
+    if (String(i.sportId) !== String(p.sportId)) return;
+    ordineGare[i.id] = (Number(i.round) || 0) * 1000 + (Number(i.ordine) || 0);
+  });
+
+  var perGara = {};
+  rows_('RISULTATI').forEach(function (r) {
+    if (String(r.sportId) !== String(p.sportId) || !r.incontroId) return;
+    if (!(r.incontroId in ordineGare)) return;
+    if (!perGara[r.incontroId]) perGara[r.incontroId] = [];
+    perGara[r.incontroId].push(r);
+  });
+
+  var gare = Object.keys(perGara).sort(function (a, b) { return ordineGare[a] - ordineGare[b]; });
+  if (!gare.length) {
+    throw new Error('Nessun arrivo registrato: compila prima gli arrivi delle gare');
+  }
+
+  var maxPos = 0;
+  gare.forEach(function (g) {
+    perGara[g].forEach(function (r) { maxPos = Math.max(maxPos, Number(r.posizione) || 0); });
+  });
+
+  // i pari merito dentro una gara restano pari merito anche nella finale
+  var gruppi = [], visti = {};
+  for (var pos = 1; pos <= maxPos; pos++) {
+    for (var k = 0; k < gare.length; k++) {
+      var gruppo = [];
+      perGara[gare[k]].forEach(function (r) {
+        if (Number(r.posizione) !== pos) return;
+        var ref = refDiRisultato_(r);
+        if (ref && !visti[ref]) { visti[ref] = 1; gruppo.push(ref); }
+      });
+      if (gruppo.length) gruppi.push(gruppo.join('+'));
+    }
+  }
+
+  var res = setClassificaSport_({ sportId: p.sportId, ordine: gruppi.join(','), incontroId: '' });
+  res.gare = gare.length;
+  return res;
 }
 
 /* ---------------- utilità ---------------- */
+
+/**
+ * Ordine di una classifica, con i pari merito.
+ * "atl:1+atl:2,atl:3" = due primi ex aequo, poi un terzo (che prende il bronzo).
+ * @returns {Array<Array<string>>} un gruppo per posizione
+ */
+function parseOrdine_(v) {
+  return String(v || '').split(',')
+    .map(function (g) { return splitPlus_(g); })
+    .filter(function (g) { return g.length; });
+}
+
+function splitPlus_(v) {
+  return String(v || '').split('+').map(function (s) { return s.trim(); })
+    .filter(function (s) { return !!s; });
+}
 
 function splitIds_(v) {
   return String(v || '').split(',').map(function (s) { return s.trim(); })

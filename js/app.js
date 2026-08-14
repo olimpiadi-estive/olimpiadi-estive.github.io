@@ -45,10 +45,17 @@ function match(p) {
   return null;
 }
 
+/**
+ * Firma del contenuto, non solo della revisione: le modifiche fatte a mano nel
+ * foglio Google non incrementano `rev`, e contare le righe non basta perché una
+ * correzione può lasciare invariato il numero di righe. Con l'hash del contenuto
+ * qualunque cambiamento fa ridisegnare la pagina.
+ */
 function stamp() {
-  const d = store.data;
-  return [d.rev, d.nazioni.length, d.atleti.length, d.sport.length, d.risultati.length,
-    JSON.stringify(d.config || {}).length].join('|');
+  const json = JSON.stringify(store.data);
+  let h = 5381;
+  for (let i = 0; i < json.length; i++) h = ((h << 5) + h + json.charCodeAt(i)) | 0;
+  return store.data.rev + ':' + json.length + ':' + h;
 }
 
 function render() {
