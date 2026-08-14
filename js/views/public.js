@@ -100,7 +100,7 @@ function badgeRiga(r) {
 export const home = {
   render() {
     const st = statsGlobali();
-    const cls = classifica().filter(r => r.gare > 0).slice(0, 3);
+    const podio = classificaAtleti().slice(0, 5);
     const attivi = sportSorted().filter(s => (s.stato || '').toLowerCase() === 'in corso');
     const impegni = prossimiImpegni(6);
     const ultimi = ultimiRisultati(6);
@@ -140,9 +140,10 @@ export const home = {
       </a>`;
     }).join('')}</div>` : ''}
 
-    ${cls.length ? `
-    <div class="section-head"><h2>Podio nazioni</h2><a class="small" href="#/classifica">Classifiche →</a></div>
-    <div class="card">${tabellaMedagliere(cls, 'Nazione', r => flagChip(r.nazione))}</div>` : ''}
+    ${podio.length ? `
+    <div class="section-head"><h2>🏅 Medagliere</h2><a class="small" href="#/classifica">Tutto il medagliere →</a></div>
+    <div class="card">${tabellaMedagliere(podio, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
+      ${flagChip(nazione(r.atleta.nazioneId), true)}`)}</div>` : ''}
 
     ${attivi.length ? `
     <div class="section-head"><h2>🔴 In corso adesso</h2></div>
@@ -775,18 +776,19 @@ export const classificaView = {
     if (!cls.length && !sqd.length) return empty('📊', 'Classifica vuota.', 'Serve almeno una nazione o una squadra.');
 
     return `
-    <h1>Classifiche</h1>
+    <h1>Medagliere</h1>
     <div class="tabs" role="tablist">
-      <button class="on" data-tab="naz" role="tab">🚩 Nazioni</button>
-      <button data-tab="zone" role="tab">🧭 Zone</button>
+      <button class="on" data-tab="atl" role="tab">🏅 Medagliere</button>
       <button data-tab="sqd" role="tab">🛡️ Squadre</button>
-      <button data-tab="atl" role="tab">🏃 Atleti</button>
+      <button data-tab="zone" role="tab">🧭 Zone</button>
     </div>
 
-    <div class="card" data-pane="naz">
-      ${tabellaMedagliere(cls, 'Nazione', r => flagChip(r.nazione))}
-      <p class="small muted" style="margin-top:.7rem">${notaOrdinamento()}
-      Le medaglie delle squadre non compaiono qui: le squadre sono miste.</p>
+    <div class="card" data-pane="atl">
+      ${atl.length ? tabellaMedagliere(atl, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
+          ${flagChip(nazione(r.atleta.nazioneId), true)}`) +
+        `<p class="small muted" style="margin-top:.7rem">${notaOrdinamento()}
+        Conta tutto: medaglie prese da soli, in squadra e con la nazione.</p>`
+        : '<div class="empty">Nessuna medaglia assegnata: compila la classifica di una disciplina.</div>'}
     </div>
 
     <div class="card hide" data-pane="zone">
@@ -799,13 +801,6 @@ export const classificaView = {
       ${sqd.length ? tabellaMedagliere(sqd, 'Squadra', r => squadraChip(r.squadra))
         : '<div class="empty">Nessuna squadra creata.</div>'}
       <p class="small muted" style="margin-top:.7rem">Classifica indipendente: le squadre sono miste per costruzione.</p>
-    </div>
-
-    <div class="card hide" data-pane="atl">
-      ${atl.length ? tabellaMedagliere(atl, 'Atleta', r => `<b>${esc(r.atleta.nome)}</b>
-          ${flagChip(nazione(r.atleta.nazioneId), true)}`) +
-        `<p class="small muted" style="margin-top:.7rem">Medaglie prese sia con la nazione sia con le squadre.</p>`
-        : '<div class="empty">Nessun risultato individuale registrato.</div>'}
     </div>`;
   },
   mount: sportDetail.mount,
