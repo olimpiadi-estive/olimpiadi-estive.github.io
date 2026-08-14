@@ -110,9 +110,13 @@ const incontroFields = (sportId) => [
       v: s.id, l: (s.icona || '') + ' ' + s.nome + ' · ' + formatoLabel(s),
     }))],
   },
-  { k: 'fase', label: 'Fase / turno', hint: 'Es. Giornata 1, Quarti, Semifinale, Finale' },
-  { k: 'round', label: 'Numero turno', type: 'number', hint: 'Nel tabellone determina l\'avanzamento del vincitore' },
+  { k: 'fase', label: 'Fase / turno', hint: 'Es. Playoff, Giornata 1, Quarti, Semifinale, Finale' },
+  { k: 'round', label: 'Numero turno', type: 'number' },
   { k: 'ordine', label: 'Ordine nel turno', type: 'number' },
+  {
+    k: 'prossimo', label: 'Dove va il vincitore',
+    hint: 'Formato turno.ordine.lato, es. 2.3.B. Vuoto: va al turno successivo nella posizione corrispondente.',
+  },
   { k: 'data', label: 'Data e ora', type: 'datetime-local' },
   { k: 'luogo', label: 'Luogo' },
   {
@@ -552,9 +556,16 @@ function previsione(formato, n, batterie = 1) {
       `${n % 2 ? n : n - 1} giornate, ${n - 1} incontri a testa. Nessun ritorno.`;
   }
   if (formato === 'tabellone') {
-    let size = 2; while (size < n) size *= 2;
-    const turni = Math.round(Math.log2(size));
-    return `Tabellone da ${size} posti: ${turni} turni, ${n - 1} partite, ${size - n} passaggi automatici al primo turno.`;
+    let posti = 1; while (posti * 2 <= n) posti *= 2;
+    const playoff = n - posti;
+    const turni = Math.round(Math.log2(posti)) + (playoff ? 1 : 0);
+    if (!playoff) {
+      return `Tabellone perfetto da ${n}: ${turni} turni, ${n - 1} partite, nessun playoff.`;
+    }
+    return `${n} non è una potenza di due: ${playoff} partit${playoff === 1 ? 'a' : 'e'} di playoff ` +
+      `fra ${playoff * 2} sorteggiati, poi tabellone da ${posti} posti. ` +
+      `In totale ${turni} turni e ${n - 1} partite. ` +
+      `I ${n - playoff * 2} non sorteggiati entrano direttamente nel tabellone.`;
   }
   return 'Gara unica: si gareggia tutti insieme, non servono incontri. Compila la classifica.';
 }
@@ -570,10 +581,12 @@ function paneClassifiche() {
   ${puntiAttivi() ? 'I punti per piazzamento sono attivi.' : 'I punti per piazzamento sono disattivati.'}</div>
   <div class="list">${list.map(s => {
     const ris = risultatiDiSport(s.id);
+    const arrivi = gareConArrivi(s.id);
     return `<div class="row-item ${isAnnullato(s) ? 'annullato' : ''}">
       <span style="font-size:1.4rem">${esc(s.icona || '🏅')}</span>
       <span class="grow"><b>${esc(s.nome)}</b>
-        <span class="small muted">${ris.length ? ris.length + ' posizioni · 🥇 ' + esc(nomiRisultato(ris[0])) : 'classifica vuota'}</span></span>
+        <span class="small muted">${ris.length ? ris.length + ' posizioni · 🥇 ' + esc(nomiRisultato(ris[0])) : 'classifica vuota'}${arrivi.length ? ' · ' + arrivi.length + ' gare con arrivi' : ''}</span></span>
+      ${arrivi.length ? `<button class="btn gold sm" data-comp="${esc(s.id)}" title="Ricava la classifica finale dagli arrivi">⚡ Dagli arrivi</button>` : ''}
       <button class="btn sm" data-cls="${esc(s.id)}">${ris.length ? 'Modifica' : 'Compila'}</button>
     </div>`;
   }).join('')}</div>
@@ -597,6 +610,12 @@ function paneClassifiche() {
 
 const refDiRisultato = r => r.squadraId ? 'sqd:' + r.squadraId
   : (idList(r.atletaIds)[0] ? 'atl:' + idList(r.atletaIds)[0] : 'naz:' + r.nazioneId);
+
+/** Gare a più concorrenti di una disciplina (gara unica o batterie). */
+const gareDiSport = sportId => incontriDiSport(sportId).filter(isGaraMultipla);
+
+/** Gare che hanno già un ordine d'arrivo registrato. */
+const gareConArrivi = sportId => gareDiSport(sportId).filter(i => risultatiDiIncontro(i.id).length);
 
 /**
  * Editor di una classifica ordinata.
@@ -637,11 +656,22 @@ function apriClassifica(sportId, incontroId) {
             <button type="button" class="icon-btn sm" data-out title="Togli">✕</button>
           </li>`;
         }).join('')}
-      </ol>`,
-    onOk: async () => {
+      </ol>
+      ${inc ? `<label class="fld" style="display:flex;gap:.5rem;align-items:flex-start;margin-top:.4rem">
+        <input type="checkbox" name="finale" style="width:auto;margin-top:.2rem" ${gareDiSport(sportId).length <= 1 ? 'checked' : ''}>
+        <span style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--txt)">
+          Aggiorna anche la <b>classifica finale</b> della disciplina (assegna le medaglie).
+          ${gareDiSport(sportId).length > 1
+            ? 'Con ' + gareDiSport(sportId).length + ' batterie la finale viene ricomposta intrecciando gli arrivi di tutte.'
+            : ''}
+        </span>
+      </label>` : ''}`,
+    onOk: async (form) => {
       const refs = [...document.querySelectorAll('#rankList li')].map(li => li.dataset.ref);
+      const finale = form.querySelector('[name="finale"]')?.checked ? 'true' : 'false';
       const out = await save('setClassificaSport',
-        { sportId, incontroId: incontroId || '', ordine: refs.join(',') }, 'Ordine salvato');
+        { sportId, incontroId: incontroId || '', ordine: refs.join(','), finale }, 'Ordine salvato');
+      if (out?.finale) toast('Classifica finale aggiornata: ' + out.finale.posizioni + ' posizioni', 'ok');
       if (out) redrawPane();
       return out !== false;
     },
@@ -730,6 +760,7 @@ function paneConfig() {
     <div id="diagOut"></div>
     <div class="btn-row">
       <button class="btn ghost sm" id="testConn">Testa connessione</button>
+      <a class="btn ghost sm" href="#/debug">Diagnostica sync</a>
       <button class="btn ghost sm" id="changeUrl">Cambia URL API</button>
       ${CONFIG.apiUrlSource === 'locale' ? '<button class="btn ghost sm" id="resetUrl">Usa il predefinito</button>' : ''}
       <button class="btn ghost sm" id="exportJson">Esporta JSON</button>
@@ -801,7 +832,8 @@ function apriGeneraCalendario(sportId) {
     onOk: async form => {
       const out = await save('generaCalendario', { sportId, ...formValues(form) },
         formato === 'tutti' ? 'Gara creata' : 'Calendario generato');
-      if (out && out.partite) toast(out.partite + (formato === 'tutti' ? ' gare create' : ' partite create'), 'ok');
+      if (out && out.nota) toast(out.nota, 'ok');
+      else if (out && out.partite) toast(out.partite + (formato === 'tutti' ? ' gare create' : ' partite create'), 'ok');
       if (out) redrawPane();
       return out !== false;
     },
@@ -873,6 +905,21 @@ function bindPane() {
   // classifica per disciplina
   pane.querySelectorAll('[data-cls]').forEach(b =>
     b.addEventListener('click', () => apriClassifica(b.dataset.cls, b.dataset.inc || '')));
+
+  // classifica finale ricavata dagli arrivi delle gare
+  pane.querySelectorAll('[data-comp]').forEach(b => b.addEventListener('click', () => {
+    const sportId = b.dataset.comp;
+    const gare = gareConArrivi(sportId);
+    confirmModal('Comporre la classifica finale?',
+      `La classifica finale di ${getSport(sportId)?.nome} verrà ricostruita dagli arrivi di ` +
+      `${gare.length} gar${gare.length === 1 ? 'a' : 'e'}` +
+      (gare.length > 1 ? ', intrecciando le posizioni (tutti i primi, poi tutti i secondi).' : '.') +
+      ' Quella attuale verrà sostituita.',
+      async () => {
+        const out = await save('componiFinale', { sportId }, 'Classifica finale composta');
+        if (out) { toast(out.posizioni + ' posizioni', 'ok'); redrawPane(); }
+      }, 'Componi');
+  }));
 
   pane.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
     switch (b.dataset.new) {

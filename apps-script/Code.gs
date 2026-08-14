@@ -37,9 +37,10 @@ var SCHEMA = {
               'squadraId', 'incontroId'],
   // Calendario: un evento per riga. latoA/latoB sono riferimenti "naz:<id>", "sqd:<id>",
   // "atl:<id>" per le sfide; `partecipanti` è l'elenco per le gare a più concorrenti.
+  // `prossimo` dice dove va il vincitore, nella forma "round.ordine.lato" (es. "2.3.B").
   INCONTRI:  ['id', 'sportId', 'fase', 'round', 'ordine', 'data', 'luogo', 'stato',
               'latoA', 'latoB', 'punteggioA', 'punteggioB', 'vincitore', 'note',
-              'partecipanti'],
+              'partecipanti', 'prossimo'],
   CONFIG:    ['chiave', 'valore']
 };
 
@@ -282,7 +283,6 @@ function remove_(name, id) {
     clearRefs_('atl:' + id);
   }
   if (name === 'ATLETI') removeWhere_('ISCRIZIONI', 'atletaId', id);
-  if (name === 'INCONTRI') removeWhere_('RISULTATI', 'incontroId', id);
   if (name === 'SPORT') {
     removeWhere_('RISULTATI', 'sportId', id);
     removeWhere_('INCONTRI', 'sportId', id);
@@ -398,32 +398,79 @@ function seedOrder_(size) {
   return order;
 }
 
-/** Struttura di un tabellone a eliminazione diretta, con i bye già propagati. */
+/**
+ * Tabellone a eliminazione diretta.
+ *
+ * Quando i partecipanti non sono una potenza di due, invece di regalare un bye
+ * a chi sta in cima all'elenco si gioca un turno di playoff: gli ultimi
+ * 2 x (n - P) partecipanti si affrontano fra loro e i vincitori entrano nel
+ * tabellone principale da P posti. Con l'ordine mescolato, chi va ai playoff
+ * è sorteggiato.
+ *
+ * @returns {{turni:number, partite:Array, playoff:number, posti:number}}
+ */
 function bracket_(refs) {
   var n = refs.length;
-  var size = 2; while (size < n) size *= 2;
-  var slots = seedOrder_(size).map(function (seed) { return seed <= n ? refs[seed - 1] : ''; });
-  var rounds = Math.round(Math.log(size) / Math.log(2));
+  var posti = 1; while (posti * 2 <= n) posti *= 2;   // potenza di due <= n
+  var playoff = n - posti;                             // quante partite preliminari
+  var turniMain = Math.round(Math.log(posti) / Math.log(2));
+  var offset = playoff > 0 ? 1 : 0;                    // il playoff occupa il turno 1
+  var partite = [];
+
+  // chi entra diretto e chi passa dal playoff
+  var diretti = refs.slice(0, n - 2 * playoff);
+  var spareggio = refs.slice(n - 2 * playoff);
+
+  // posti del tabellone principale: prima i diretti, poi i posti dei vincitori
+  var ingressi = diretti.slice();
+  for (var q = 0; q < playoff; q++) ingressi.push(null); // null = vincitore del playoff q
+  var ordine = seedOrder_(posti);
+  var slots = ordine.map(function (seed) {
+    var v = ingressi[seed - 1];
+    return v === undefined ? '' : v;                    // '' = posto vuoto, null = da playoff
+  });
+
+  // struttura del tabellone principale
   var m = {};
-  for (var r = 1; r <= rounds; r++) {
+  for (var r = 1; r <= turniMain; r++) {
     m[r] = [];
-    var cnt = size / Math.pow(2, r);
+    var cnt = posti / Math.pow(2, r);
     for (var i = 0; i < cnt; i++) m[r].push({ A: '', B: '' });
   }
-  for (var j = 0; j < size / 2; j++) { m[1][j].A = slots[2 * j]; m[1][j].B = slots[2 * j + 1]; }
+  var destinazioni = []; // dove finisce il vincitore di ogni playoff
+  for (var j = 0; j < posti / 2; j++) {
+    var sa = slots[2 * j], sb = slots[2 * j + 1];
+    m[1][j].A = sa === null ? '' : sa;
+    m[1][j].B = sb === null ? '' : sb;
+    if (sa === null) destinazioni.push({ round: 1 + offset, ordine: j + 1, lato: 'A' });
+    if (sb === null) destinazioni.push({ round: 1 + offset, ordine: j + 1, lato: 'B' });
+  }
 
-  var skip = {};
-  for (var k = 0; k < m[1].length; k++) {
-    var a = m[1][k].A, b = m[1][k].B;
-    if ((a && !b) || (!a && b)) {
-      skip[k] = true; // niente partita: passa il turno
-      if (rounds >= 2) {
-        var ni = Math.floor(k / 2);
-        if (k % 2 === 0) m[2][ni].A = a || b; else m[2][ni].B = a || b;
-      }
+  // turno di playoff
+  for (var k = 0; k < playoff; k++) {
+    var d = destinazioni[k] || null;
+    partite.push({
+      fase: playoff === 1 ? 'Playoff di qualificazione' : 'Playoff di qualificazione',
+      round: 1, ordine: k + 1,
+      A: spareggio[2 * k] || '', B: spareggio[2 * k + 1] || '',
+      prossimo: d ? d.round + '.' + d.ordine + '.' + d.lato : ''
+    });
+  }
+
+  // turni del tabellone principale
+  for (var r2 = 1; r2 <= turniMain; r2++) {
+    for (var i2 = 0; i2 < m[r2].length; i2++) {
+      var dest = r2 < turniMain
+        ? (r2 + 1 + offset) + '.' + Math.ceil((i2 + 1) / 2) + '.' + ((i2 + 1) % 2 === 1 ? 'A' : 'B')
+        : '';
+      partite.push({
+        fase: nomeTurno_(r2, turniMain), round: r2 + offset, ordine: i2 + 1,
+        A: m[r2][i2].A, B: m[r2][i2].B, prossimo: dest
+      });
     }
   }
-  return { rounds: rounds, m: m, skip: skip };
+
+  return { turni: turniMain + offset, partite: partite, playoff: playoff, posti: posti };
 }
 
 /** Tutti contro tutti con il metodo del cerchio: una giornata per turno. */
@@ -477,7 +524,8 @@ function generaCalendario_(p) {
   if (String(p.mescola) === 'true') refs = shuffle_(refs);
 
   var n = refs.length;
-  var partite = []; // {fase, round, ordine, A, B, partecipanti}
+  var partite = []; // {fase, round, ordine, A, B, partecipanti, prossimo}
+  var esitoGen = {};
 
   if (formato === 'tutti') {
     // Gara unica: tutti in campo insieme. Con più batterie i concorrenti
@@ -499,16 +547,10 @@ function generaCalendario_(p) {
     });
   } else if (formato === 'tabellone') {
     if (n > 32) throw new Error('Troppi partecipanti per un tabellone: ' + n + ' (massimo 32)');
+    if (n < 2) throw new Error('Servono almeno 2 partecipanti');
     var br = bracket_(refs);
-    for (var r = 1; r <= br.rounds; r++) {
-      for (var i = 0; i < br.m[r].length; i++) {
-        if (r === 1 && br.skip[i]) continue;
-        partite.push({
-          fase: nomeTurno_(r, br.rounds), round: r, ordine: i + 1,
-          A: br.m[r][i].A, B: br.m[r][i].B
-        });
-      }
-    }
+    partite = br.partite;
+    esitoGen = { playoff: br.playoff, posti: br.posti, turni: br.turni };
   } else { // scontri diretti: tutti contro tutti in gare singole, senza ritorno
     var tot = n * (n - 1) / 2;
     if (tot > 120) throw new Error('Sarebbero ' + tot + ' partite: troppe. Riduci i partecipanti o dividi in gruppi.');
@@ -538,16 +580,23 @@ function generaCalendario_(p) {
       ordine: String(x.ordine), data: intervallo ? slotTime_(inizio, intervallo, idx) : (idx === 0 ? inizio : ''),
       luogo: luogo, stato: 'programmato', latoA: x.A || '', latoB: x.B || '',
       punteggioA: '', punteggioB: '', vincitore: '', note: '',
-      partecipanti: x.partecipanti || ''
+      partecipanti: x.partecipanti || '', prossimo: x.prossimo || ''
     };
     return cols.map(function (c) { return o[c] !== undefined ? String(o[c]) : ''; });
   });
   appendRows_('INCONTRI', rows);
 
-  return {
+  var out = {
     sportId: p.sportId, formato: formato, fonte: fonte,
     partecipanti: n, partite: rows.length
   };
+  if (esitoGen.playoff) {
+    out.playoff = esitoGen.playoff;
+    out.posti = esitoGen.posti;
+    out.nota = esitoGen.playoff + ' partite di playoff per arrivare a ' + esitoGen.posti +
+      ' posti nel tabellone';
+  }
+  return out;
 }
 
 /** In un tabellone, porta il vincitore al turno successivo. */
@@ -581,14 +630,29 @@ function propagaVincitore_(p) {
 
   var round = Number(inc.round), ordine = Number(inc.ordine);
   if (!round || !ordine) return;
+
+  // `prossimo` ("round.ordine.lato") è la destinazione esplicita: serve perché
+  // dopo un turno di playoff il numero di partite non si dimezza.
+  var destR, destO, destLato;
+  var pross = String(inc.prossimo || '').split('.');
+  if (pross.length === 3 && Number(pross[0]) && Number(pross[1])) {
+    destR = Number(pross[0]);
+    destO = Number(pross[1]);
+    destLato = pross[2].toUpperCase() === 'B' ? 'latoB' : 'latoA';
+  } else {
+    destR = round + 1;
+    destO = Math.ceil(ordine / 2);
+    destLato = (ordine % 2 === 1) ? 'latoA' : 'latoB';
+  }
+
   var target = null;
   rows_('INCONTRI').forEach(function (r) {
-    if (String(r.sportId) === String(inc.sportId) && Number(r.round) === round + 1 &&
-        Number(r.ordine) === Math.ceil(ordine / 2)) target = r;
+    if (String(r.sportId) === String(inc.sportId) && Number(r.round) === destR &&
+        Number(r.ordine) === destO) target = r;
   });
   if (!target) return;
 
-  var lato = (ordine % 2 === 1) ? 'latoA' : 'latoB';
+  var lato = destLato;
   if (String(target[lato] || '') === String(w)) return;
   var patch = { id: target.id };
   patch[lato] = w;

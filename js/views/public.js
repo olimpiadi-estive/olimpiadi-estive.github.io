@@ -6,7 +6,7 @@ import {
   atletiDiNazione, atletiDiSquadra, nazioniDiSquadra, squadreDiAtleta,
   risultatiDiSport, atletiDiRisultato, incontriDiSport, fasiDiSport,
   gironeStandings, esitoIncontro, isConcluso, puntiIncontro,
-  isFinale, risultatiDiIncontro, partecipantiIncontro, isGaraMultipla,
+  isFinale, risultatiDiIncontro, partecipantiIncontro, isGaraMultipla, provenienza,
   nazione, atleta, squadra, sport as getSport,
   puntiPerPosizione, puntiSchema, puntiAttivi, refEntity, ZONE, zonaLabel,
   FORMATI, formatoLabel, formatoDi, formatoMeta, isAnnullato,
@@ -233,17 +233,22 @@ export const sportList = {
 function matchCard(i, compact) {
   const esito = esitoIncontro(i);
   const done = isConcluso(i);
-  const side = (ref, punteggio, vinta) => {
+  const side = (ref, punteggio, vinta, lato) => {
     const e = refEntity(ref);
+    let vuoto = '<i class="muted">da definire</i>';
+    if (!e) {
+      const src = provenienza(i, lato);
+      if (src) vuoto = `<i class="muted">vincente ${esc((src.fase || 'turno') + ' ' + (src.ordine || ''))}</i>`;
+    }
     return `<div class="side ${vinta ? 'win' : ''}">
       <span class="dot" style="background:${esc(e?.colore || '#c9d4e8')}"></span>
-      <span class="nm">${e ? esc(e.emoji + ' ' + e.nome) : '<i class="muted">da definire</i>'}</span>
+      <span class="nm">${e ? esc(e.emoji + ' ' + e.nome) : vuoto}</span>
       <b class="sc">${punteggio !== '' && punteggio !== undefined ? esc(punteggio) : (done ? '—' : '')}</b>
     </div>`;
   };
   return `<div class="match ${done ? 'done' : ''}">
-    ${side(i.latoA, i.punteggioA, esito === 'A')}
-    ${side(i.latoB, i.punteggioB, esito === 'B')}
+    ${side(i.latoA, i.punteggioA, esito === 'A', 'A')}
+    ${side(i.latoB, i.punteggioB, esito === 'B', 'B')}
     <div class="meta">
       ${i.data ? '🕒 ' + esc(fmtDate(i.data)) : ''}
       ${i.luogo ? ' · 📍 ' + esc(i.luogo) : ''}

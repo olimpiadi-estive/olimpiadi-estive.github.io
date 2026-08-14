@@ -6,10 +6,12 @@ import {
   squadreList, squadraDetail, atletiList, classificaView, calendarioView,
 } from './views/public.js';
 import { admin } from './views/admin.js';
+import { debugView } from './views/debug.js';
 
 const ROUTES = [
   [/^\/?$/, home],
   [/^\/calendario$/, calendarioView],
+  [/^\/debug$/, debugView],
   [/^\/sport$/, sportList],
   [/^\/sport\/(.+)$/, sportDetail, ['id']],
   [/^\/nazioni$/, nazioniList],
@@ -119,6 +121,12 @@ document.getElementById('btnRefresh').addEventListener('click', () => {
   store.refresh();
   toast('Aggiorno…');
 });
+
+// la spia di stato apre la diagnostica
+const badge = document.getElementById('syncBadge');
+badge.style.cursor = 'pointer';
+badge.title = 'Apri la diagnostica';
+badge.addEventListener('click', () => { location.hash = '#/debug'; });
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) store.refresh({ silent: true });

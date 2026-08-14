@@ -110,7 +110,27 @@ Ogni disciplina ha il suo formato, che decide come viene mostrato il calendario 
 |---|---|---|
 | **Tutti contro tutti** | niente: è una gara unica con tutti in campo insieme | solo la classifica finale |
 | **Scontri diretti** | ogni partecipante affronta gli altri una volta sola, `n(n-1)/2` partite divise in giornate, senza ritorno | elenco incontri + classifica |
-| **Eliminazione diretta** | tabellone con teste di serie e passaggi automatici, `n-1` partite | turni affiancati, scorrevoli |
+| **Eliminazione diretta** | tabellone da `n-1` partite, con turno di playoff se `n` non è potenza di due | turni affiancati, scorrevoli |
+
+### Playoff quando i partecipanti non sono 2, 4, 8, 16…
+
+Invece di regalare un bye a chi capita in cima all'elenco, si gioca un **turno di playoff**: detto
+`P` la potenza di due immediatamente sotto `n`, gli ultimi `2 × (n − P)` partecipanti si affrontano fra
+loro e i vincitori entrano nel tabellone da `P` posti. Con l'ordine mescolato chi va ai playoff è
+sorteggiato; con l'ordine di iscrizione vanno ai playoff gli ultimi registrati, così le teste di serie
+restano protette.
+
+Con 10 partecipanti: 2 partite di playoff fra 4 sorteggiati, 6 entrano diretti, tabellone da 8, in
+totale 4 turni e 9 partite. Il totale è sempre `n − 1`, qualunque sia `n`.
+
+Ogni incontro porta scritto **dove va il vincitore** (campo `prossimo`, nella forma `turno.ordine.lato`),
+perché dopo un playoff il numero di partite non si dimezza e la regola implicita non basterebbe. Nel
+tabellone i posti ancora vuoti mostrano *"vincente Playoff 2"* invece di un generico "da definire", e
+il campo è modificabile a mano se vuoi cambiare l'incrocio.
+
+L'algoritmo ha un test: `powershell -File tools\verifica-tabellone.ps1` controlla, da 2 a 17
+partecipanti, che le partite siano `n−1`, che i posti vuoti nel tabellone corrispondano ai playoff e
+che due vincitori non finiscano mai nello stesso slot.
 
 Con 10 partecipanti: scontri diretti fa 45 partite in 9 giornate, 9 incontri a testa; eliminazione
 diretta fa un tabellone da 16 con 4 turni, 9 partite e 6 passaggi automatici al primo turno.
@@ -168,6 +188,45 @@ apps-script/Code.gs        backend da incollare in Apps Script
 tools/make-icons.ps1       rigenera le icone PNG
 icons/                     icone PWA
 ```
+
+## Gare "tutti contro tutti" e classifica finale
+
+Una disciplina "tutti contro tutti" genera **una gara** con tutti i concorrenti dentro, oppure più
+**batterie** con i concorrenti distribuiti a serpentina. Ogni gara ha il pulsante **Arrivi**, che apre
+l'editor ordinato dei suoi soli concorrenti.
+
+I risultati sono di due tipi, e la distinzione serve a non moltiplicare le medaglie:
+
+| Tipo | Come si riconosce | Assegna medaglie |
+|---|---|---|
+| Arrivo di una gara o batteria | ha `incontroId` | no |
+| Classifica finale della disciplina | `incontroId` vuoto | **sì**: oro, argento, bronzo ai primi tre |
+
+Per collegarli ci sono due scorciatoie:
+
+- Nell'editor degli arrivi, la casella **"Aggiorna anche la classifica finale"** (già spuntata quando
+  c'è una sola gara): salvi una volta e la finale si allinea.
+- In Admin ▸ Classifiche, il pulsante **⚡ Dagli arrivi** ricompone la finale dagli arrivi di tutte le
+  gare. Con più batterie intreccia le posizioni: prima tutti i primi classificati, poi tutti i
+  secondi, e così via. È un punto di partenza ragionevole, poi la aggiusti a mano con le frecce.
+
+## Diagnostica della sincronizzazione
+
+Tocca la **spia dell'ora** in alto a destra, oppure vai su `#/debug` o Admin ▸ Impostazioni ▸
+*Diagnostica sync*. La schermata mostra ultimo sync riuscito e durata, errori consecutivi, se i dati
+vengono dalla cache locale, revisione dei dati, stato del service worker e il log delle ultime
+richieste con durata ed esito (conservato anche tra un riavvio e l'altro).
+
+**▶ Esegui test** fa cinque letture consecutive e riporta latenza media e massima: è il modo per
+distinguere un problema di rete da un Apps Script lento. Sopra i 10 secondi di picco il messaggio lo
+segnala, perché a 15 la lettura scade. **Copia rapporto** mette tutto negli appunti in forma testuale.
+**Svuota cache e ricarica** disinstalla il service worker e riparte pulito, utile quando il browser
+serve una versione vecchia.
+
+Le richieste hanno un timeout (15 secondi in lettura con un secondo tentativo, 45 in scrittura perché
+le generazioni scrivono decine di righe) e una guardia che dopo 20 secondi considera persa una
+richiesta rimasta appesa. Senza queste protezioni una singola richiesta bloccata impediva **tutti** i
+sync successivi, in silenzio, fino al ricaricamento della pagina.
 
 ## Risoluzione problemi
 

@@ -490,6 +490,17 @@ export function fasiDiSport(sportId) {
 
 export const isConcluso = i => (i.stato || '').toLowerCase() === 'concluso';
 
+/**
+ * Incontro che alimenta un lato ancora vuoto (campo `prossimo` = "round.ordine.lato").
+ * Serve a scrivere "vincente Playoff 2" invece di un generico "da definire".
+ */
+export function provenienza(inc, lato) {
+  if (!inc) return null;
+  const target = `${Number(inc.round)}.${Number(inc.ordine)}.${lato}`;
+  return store.data.incontri.find(i =>
+    String(i.sportId) === String(inc.sportId) && String(i.prossimo || '') === target) || null;
+}
+
 /** Punti per vittoria/pareggio nei gironi (configurabili). */
 export function puntiIncontro() {
   const c = store.data.config || {};
